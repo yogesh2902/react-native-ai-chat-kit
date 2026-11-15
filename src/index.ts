@@ -12,7 +12,8 @@ export type { SessionGroup } from './sessions/groupSessions';
 
 // Components
 export { ChatHistory } from './components/ChatHistory';
-export type { ChatHistoryProps } from './components/ChatHistory';
+export type { ChatHistoryProps, ChatHistoryItemRenderProps } from './components/ChatHistory';
+export type { ChatStyles, MessageRenderers, SendButtonRenderProps, StopButtonRenderProps } from './components/customization';
 export { ChatThemeProvider, useResolvedTheme } from './components/ChatThemeProvider';
 export type { ThemeProps } from './components/ChatThemeProvider';
 export { ChatView } from './components/ChatView';
@@ -40,7 +41,7 @@ export type { Block, InlineNode } from './markdown/parse';
 export { highlight } from './markdown/highlight';
 
 // Theme
-export { lightTheme, darkTheme, mergeTheme, useChatTheme, ChatThemeContext } from './theme';
+export { lightTheme, darkTheme, mergeTheme, useChatTheme, ChatThemeContext, fontStyle } from './theme';
 export type { ChatTheme, ChatThemeOverrides } from './theme';
 
 // Types & utils

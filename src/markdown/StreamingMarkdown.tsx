@@ -1,6 +1,6 @@
 import React, { memo, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
-import { useChatTheme, type ChatTheme } from '../theme';
+import { fontStyle, useChatTheme, type ChatTheme } from '../theme';
 import { highlight } from './highlight';
 import { parseBlocks, parseInline, type Block, type InlineNode } from './parse';
 
@@ -69,7 +69,7 @@ const MemoBlock = memo(BlockView, (a, b) =>
 
 function BlockView({ block, partial, ctx, first }: { block: Block; partial: boolean; ctx: Ctx; first: boolean }) {
   const { theme, color } = ctx;
-  const base: TextStyle = { color, fontSize: theme.fontSize, lineHeight: theme.lineHeight };
+  const base: TextStyle = { color, fontSize: theme.fontSize, lineHeight: theme.lineHeight, ...fontStyle(theme) };
   const spacing = first ? null : styles.spacing;
 
   switch (block.type) {
@@ -79,7 +79,7 @@ function BlockView({ block, partial, ctx, first }: { block: Block; partial: bool
         <Text
           accessibilityRole="header"
           selectable={ctx.selectable}
-          style={[base, spacing, { fontSize: theme.fontSize * scale, lineHeight: theme.fontSize * scale * 1.35, fontWeight: '700' }]}
+          style={[base, spacing, { fontSize: theme.fontSize * scale, lineHeight: theme.fontSize * scale * 1.35, ...fontStyle(theme, 'bold') }]}
         >
           <Inline nodes={parseInline(block.text, partial)} ctx={ctx} />
         </Text>
@@ -138,7 +138,7 @@ function Inline({ nodes, ctx }: { nodes: InlineNode[]; ctx: Ctx }) {
             return node.text;
           case 'strong':
             return (
-              <Text key={i} style={styles.bold}>
+              <Text key={i} style={fontStyle(theme, 'bold')}>
                 <Inline nodes={node.children} ctx={ctx} />
               </Text>
             );
@@ -240,13 +240,13 @@ function Table({ block, ctx, partial, style }: { block: Extract<Block, { type: '
     }
     return w;
   }, [block, columns, theme.fontSize]);
-  const cellText: TextStyle = { color: ctx.color, fontSize: theme.fontSize * 0.92, lineHeight: theme.lineHeight * 0.92 };
+  const cellText: TextStyle = { color: ctx.color, fontSize: theme.fontSize * 0.92, lineHeight: theme.lineHeight * 0.92, ...fontStyle(theme) };
 
   const renderRow = (cells: string[], header: boolean, key: number, isLast: boolean) => (
     <View key={key} style={[styles.row, { borderBottomColor: theme.colors.border, borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth }]}>
       {Array.from({ length: columns }, (_, c) => (
         <View key={c} style={[styles.cell, { width: widths[c] }]}>
-          <Text selectable={ctx.selectable} style={[cellText, header && styles.bold, { textAlign: block.align[c] ?? 'left' }]}>
+          <Text selectable={ctx.selectable} style={[cellText, header && fontStyle(theme, 'bold'), { textAlign: block.align[c] ?? 'left' }]}>
             <Inline nodes={parseInline(cells[c] ?? '', partial && isLast)} ctx={ctx} />
           </Text>
         </View>
@@ -255,7 +255,14 @@ function Table({ block, ctx, partial, style }: { block: Extract<Block, { type: '
   );
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={style}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      // Don't stretch the table to the scroll view's height: on Android a
+      // horizontal ScrollView can keep a taller height from mid-stream layouts.
+      style={[styles.tableScroll, style]}
+      contentContainerStyle={styles.tableContent}
+    >
       <View style={[styles.table, { borderColor: theme.colors.border, borderRadius: theme.radius * 0.5 }]}>
         <View style={{ backgroundColor: theme.colors.inlineCodeBackground }}>{renderRow(block.header, true, -1, false)}</View>
         {block.rows.map((row, r) => renderRow(row, false, r, r === block.rows.length - 1))}
@@ -267,7 +274,6 @@ function Table({ block, ctx, partial, style }: { block: Extract<Block, { type: '
 const styles = StyleSheet.create({
   root: { flexShrink: 1 },
   spacing: { marginTop: 10 },
-  bold: { fontWeight: '700' },
   italic: { fontStyle: 'italic' },
   strike: { textDecorationLine: 'line-through' },
   quote: { borderLeftWidth: 3, paddingLeft: 12 },
@@ -280,6 +286,8 @@ const styles = StyleSheet.create({
   codeLang: { color: '#9AA0A8', fontSize: 12 },
   copy: { color: '#C9CDD3', fontSize: 12, fontWeight: '600' },
   codeScroll: { padding: 12 },
+  tableScroll: { flexGrow: 0 },
+  tableContent: { alignItems: 'flex-start' },
   table: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   row: { flexDirection: 'row' },
   cell: { paddingHorizontal: 10, paddingVertical: 8 },

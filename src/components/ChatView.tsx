@@ -13,14 +13,15 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { useChatTheme } from '../theme';
+import { fontStyle, useChatTheme } from '../theme';
 import type { ChatMessage } from '../types';
 import { ChatThemeProvider, type ThemeProps } from './ChatThemeProvider';
 import { Composer, type ComposerProps } from './Composer';
+import type { ChatStyles, MessageRenderers, SendButtonRenderProps, StopButtonRenderProps } from './customization';
 import { MessageBubble } from './MessageBubble';
 import { useKeyboardInset } from './useKeyboardInset';
 
-export type ChatViewProps = ThemeProps & {
+export type ChatViewProps = ThemeProps & MessageRenderers & {
   messages: ChatMessage[];
   /** `send` from useChat. */
   send: (text: string) => void;
@@ -37,6 +38,13 @@ export type ChatViewProps = ThemeProps & {
   onCopyMessage?: (text: string) => void;
   onCopyCode?: (code: string) => void;
   onLinkPress?: (url: string) => void;
+
+  /** Style overrides for individual pieces (bubbles, input, chips…). */
+  styles?: ChatStyles;
+  /** Replace the send button. Call `onPress` to send. */
+  renderSendButton?: (props: SendButtonRenderProps) => React.ReactNode;
+  /** Replace the stop button shown while a reply streams. */
+  renderStopButton?: (props: StopButtonRenderProps) => React.ReactNode;
 
   /** Fully replace how a message renders. */
   renderMessage?: (message: ChatMessage, index: number) => React.ReactElement | null;
@@ -73,6 +81,12 @@ function ChatViewInner({
   bottomInset,
   composerProps,
   style,
+  styles: custom = {},
+  renderAvatar,
+  renderToolCall,
+  renderTypingIndicator,
+  renderSendButton,
+  renderStopButton,
 }: Omit<ChatViewProps, keyof ThemeProps>) {
   const theme = useChatTheme();
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -98,9 +112,25 @@ function ChatViewInner({
           onCopyMessage={onCopyMessage}
           onCopyCode={onCopyCode}
           onLinkPress={onLinkPress}
+          renderAvatar={renderAvatar}
+          renderToolCall={renderToolCall}
+          renderTypingIndicator={renderTypingIndicator}
+          styles={custom}
         />
       ),
-    [renderMessage, data.length, lastAssistantId, retry, onCopyMessage, onCopyCode, onLinkPress],
+    [
+      renderMessage,
+      data.length,
+      lastAssistantId,
+      retry,
+      onCopyMessage,
+      onCopyCode,
+      onLinkPress,
+      renderAvatar,
+      renderToolCall,
+      renderTypingIndicator,
+      custom,
+    ],
   );
 
   const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -119,7 +149,7 @@ function ChatViewInner({
       {empty ? (
         <View style={styles.empty}>
           {emptyState ?? (
-            <Text style={{ color: theme.colors.text, fontSize: theme.fontSize * 1.4, fontWeight: '700', textAlign: 'center' }}>
+            <Text style={[{ color: theme.colors.text, fontSize: theme.fontSize * 1.4, textAlign: 'center' }, fontStyle(theme, 'bold')]}>
               How can I help?
             </Text>
           )}
@@ -133,9 +163,10 @@ function ChatViewInner({
                   style={({ pressed }) => [
                     styles.chip,
                     { borderColor: theme.colors.border, backgroundColor: theme.colors.inputBackground, opacity: pressed ? 0.7 : 1 },
+                    custom.suggestionChip,
                   ]}
                 >
-                  <Text style={{ color: theme.colors.text, fontSize: theme.fontSize * 0.9 }}>{s}</Text>
+                  <Text style={[{ color: theme.colors.text, fontSize: theme.fontSize * 0.9 }, fontStyle(theme), custom.suggestionText]}>{s}</Text>
                 </Pressable>
               ))}
             </View>
@@ -153,7 +184,7 @@ function ChatViewInner({
             scrollEventThrottle={64}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[styles.listContent, custom.listContent]}
           />
           {showJump ? (
             <Pressable
@@ -174,6 +205,11 @@ function ChatViewInner({
         placeholder={placeholder}
         // The keyboard covers the home indicator / nav bar, so drop that inset while it's open.
         bottomInset={keyboard.visible ? 0 : bottomInset}
+        renderSendButton={renderSendButton}
+        renderStopButton={renderStopButton}
+        style={custom.composer}
+        boxStyle={custom.composerBox}
+        inputStyle={custom.input}
         {...composerProps}
       />
     </>

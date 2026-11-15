@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { useChatTheme } from '../theme';
+import { fontStyle, useChatTheme } from '../theme';
 import type { ToolCallPart } from '../types';
 
 /** "search_flights" → "Search flights" */
@@ -37,10 +37,10 @@ export function ToolCallCard({ part }: { part: ToolCallPart }) {
         )}
       </View>
       <View style={styles.body}>
-        <Text style={{ color: theme.colors.text, fontSize: theme.fontSize * 0.9, fontWeight: '600' }} numberOfLines={2}>
+        <Text style={[{ color: theme.colors.text, fontSize: theme.fontSize * 0.9 }, fontStyle(theme, 'bold')]} numberOfLines={2}>
           {title}
         </Text>
-        <Text style={{ color: part.state === 'error' ? theme.colors.danger : theme.colors.textMuted, fontSize: theme.fontSize * 0.78 }} numberOfLines={2}>
+        <Text style={[{ color: part.state === 'error' ? theme.colors.danger : theme.colors.textMuted, fontSize: theme.fontSize * 0.78 }, fontStyle(theme)]} numberOfLines={2}>
           {statusText}
         </Text>
       </View>

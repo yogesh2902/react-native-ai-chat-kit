@@ -13,8 +13,17 @@ import {
 } from 'react-native';
 import { filterSessions, formatSessionTime, groupSessionsByDate } from '../sessions/groupSessions';
 import type { ChatSessionMeta } from '../sessions/store';
-import { useChatTheme } from '../theme';
+import { fontStyle, useChatTheme } from '../theme';
 import { ChatThemeProvider, type ThemeProps } from './ChatThemeProvider';
+
+export type ChatHistoryItemRenderProps = {
+  session: ChatSessionMeta;
+  active: boolean;
+  /** Open this chat. */
+  onPress: () => void;
+  /** Ask to delete (shows the Delete button in the default row). */
+  onDelete?: () => void;
+};
 
 export type ChatHistoryProps = ThemeProps & {
   sessions: ChatSessionMeta[];
@@ -32,6 +41,8 @@ export type ChatHistoryProps = ThemeProps & {
   header?: React.ReactNode;
   emptyText?: string;
   style?: StyleProp<ViewStyle>;
+  /** Render each row yourself. */
+  renderItem?: (props: ChatHistoryItemRenderProps) => React.ReactNode;
 };
 
 /** A ChatGPT-style list of past conversations, grouped by date. */
@@ -56,6 +67,7 @@ function ChatHistoryInner({
   header,
   emptyText = 'No conversations yet',
   style,
+  renderItem: renderCustomItem,
 }: Omit<ChatHistoryProps, keyof ThemeProps>) {
   const theme = useChatTheme();
   const [query, setQuery] = useState('');
@@ -63,12 +75,14 @@ function ChatHistoryInner({
   const [confirmingClear, setConfirmingClear] = useState(false);
   const sections = useMemo(() => groupSessionsByDate(filterSessions(sessions, query)), [sessions, query]);
   const { colors } = theme;
+  const regular = fontStyle(theme);
+  const bold = fontStyle(theme, 'bold');
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }, style]}>
       {header}
       <View style={styles.top}>
-        <Text accessibilityRole="header" style={[styles.title, { color: colors.text }]}>
+        <Text accessibilityRole="header" style={[styles.title, { color: colors.text }, bold]}>
           {title}
         </Text>
         {onNewChat ? (
@@ -78,7 +92,7 @@ function ChatHistoryInner({
             onPress={onNewChat}
             style={({ pressed }) => [styles.newButton, { backgroundColor: colors.accent, opacity: pressed ? 0.7 : 1 }]}
           >
-            <Text style={{ color: colors.onAccent, fontWeight: '700', fontSize: 14 }}>＋ New chat</Text>
+            <Text style={[{ color: colors.onAccent, fontSize: 14 }, bold]}>＋ New chat</Text>
           </Pressable>
         ) : null}
       </View>
@@ -95,6 +109,7 @@ function ChatHistoryInner({
             style={[
               styles.searchInput,
               { color: colors.text },
+              regular,
               Platform.OS === 'web' && ({ outlineStyle: 'none' } as object),
             ]}
           />
@@ -111,13 +126,13 @@ function ChatHistoryInner({
           stickySectionHeadersEnabled={false}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
-            <Text style={[styles.empty, { color: colors.textMuted }]}>{query ? 'No matching chats' : emptyText}</Text>
+            <Text style={[styles.empty, { color: colors.textMuted }, regular]}>{query ? 'No matching chats' : emptyText}</Text>
           }
           ListFooterComponent={
             onClearAll && sessions.length > 0 && !query ? (
               confirmingClear ? (
                 <View style={[styles.clearConfirm, { borderColor: colors.border }]}>
-                  <Text style={{ color: colors.text, fontSize: 14, textAlign: 'center' }}>
+                  <Text style={[{ color: colors.text, fontSize: 14, textAlign: 'center' }, regular]}>
                     {`${sessions.length === 1 ? 'Delete this chat' : `Delete all ${sessions.length} chats`}? This can't be undone.`}
                   </Text>
                   <View style={styles.clearActions}>
@@ -127,7 +142,7 @@ function ChatHistoryInner({
                       onPress={() => setConfirmingClear(false)}
                       style={[styles.clearButton, { borderColor: colors.border, borderWidth: StyleSheet.hairlineWidth }]}
                     >
-                      <Text style={{ color: colors.text, fontWeight: '600' }}>Cancel</Text>
+                      <Text style={[{ color: colors.text }, bold]}>Cancel</Text>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
@@ -138,7 +153,7 @@ function ChatHistoryInner({
                       }}
                       style={[styles.clearButton, { backgroundColor: colors.danger }]}
                     >
-                      <Text style={styles.deleteText}>Delete all</Text>
+                      <Text style={[styles.deleteText, bold]}>Delete all</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -149,16 +164,28 @@ function ChatHistoryInner({
                   onPress={() => setConfirmingClear(true)}
                   style={({ pressed }) => [styles.clearLink, { opacity: pressed ? 0.6 : 1 }]}
                 >
-                  <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 14 }}>Clear all chats</Text>
+                  <Text style={[{ color: colors.danger, fontSize: 14 }, bold]}>Clear all chats</Text>
                 </Pressable>
               )
             ) : undefined
           }
           renderSectionHeader={({ section }) => (
-            <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{section.title}</Text>
+            <Text style={[styles.sectionTitle, { color: colors.textMuted }, bold]}>{section.title}</Text>
           )}
           renderItem={({ item }) => {
             const active = item.id === activeSessionId;
+            if (renderCustomItem) {
+              return (
+                <>
+                  {renderCustomItem({
+                    session: item,
+                    active,
+                    onPress: () => onSelect(item.id),
+                    onDelete: onDelete ? () => onDelete(item.id) : undefined,
+                  })}
+                </>
+              );
+            }
             const confirming = item.id === confirmingId;
             return (
               <Pressable
@@ -176,15 +203,15 @@ function ChatHistoryInner({
               >
                 <View style={styles.rowText}>
                   <View style={styles.rowTop}>
-                    <Text numberOfLines={1} style={[styles.rowTitle, { color: colors.text }]}>
+                    <Text numberOfLines={1} style={[styles.rowTitle, { color: colors.text }, bold]}>
                       {item.title}
                     </Text>
                     {!confirming ? (
-                      <Text style={[styles.time, { color: colors.textMuted }]}>{formatSessionTime(item.updatedAt)}</Text>
+                      <Text style={[styles.time, { color: colors.textMuted }, regular]}>{formatSessionTime(item.updatedAt)}</Text>
                     ) : null}
                   </View>
                   {item.preview ? (
-                    <Text numberOfLines={1} style={[styles.preview, { color: colors.textMuted }]}>
+                    <Text numberOfLines={1} style={[styles.preview, { color: colors.textMuted }, regular]}>
                       {item.preview}
                     </Text>
                   ) : null}
@@ -199,7 +226,7 @@ function ChatHistoryInner({
                     }}
                     style={[styles.delete, { backgroundColor: colors.danger }]}
                   >
-                    <Text style={styles.deleteText}>Delete</Text>
+                    <Text style={[styles.deleteText, bold]}>Delete</Text>
                   </Pressable>
                 ) : null}
               </Pressable>

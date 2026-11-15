@@ -38,6 +38,7 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - 📊 Tables, lists, task lists, quotes, headings, links.
 - ⏹️ **Stop & Retry**, error states, "scroll to latest" button.
 - 💬 **Starter suggestions** for empty chats.
+- 🎨 **Fully customizable**: theme, custom fonts, per-piece styles, avatars, custom tool cards, send/stop buttons and history rows.
 - 🌗 **Light/dark themes**, fully overridable.
 - ⌨️ Enter-to-send on web/desktop, keyboard-aware on iOS/Android.
 - 🗂️ **Chat history**: saved conversations you can reopen and continue, with a ready-made history screen.
@@ -115,6 +116,65 @@ const transport = createStreamTransport({
   headers: async () => ({ Authorization: `Bearer ${await getUserToken()}` }),
 });
 ```
+
+## Customization
+
+Everything is customizable, from a color tweak to a fully custom UI.
+
+**1. Theme: colors, font, sizes, light/dark**
+
+```tsx
+<ChatView
+  {...chat}
+  colorScheme="auto" // 'light' | 'dark' | 'auto'
+  theme={{
+    colors: { accent: '#7C3AED', userBubble: '#7C3AED', userText: '#fff', assistantBubble: '#F4F0FF' },
+    fontFamily: 'Inter-Regular', // load it first, e.g. with expo-font
+    fontFamilyBold: 'Inter-Bold',
+    fontSize: 15,
+    radius: 8,
+  }}
+/>
+```
+
+**2. Style any piece**
+
+```tsx
+<ChatView
+  {...chat}
+  styles={{
+    userBubble: { borderBottomRightRadius: 2 },
+    assistantBubble: { borderWidth: 1, borderColor: '#E9E3FF' },
+    composerBox: { borderColor: '#7C3AED', borderWidth: 1.5 },
+    input: { fontSize: 17 },
+    suggestionChip: { backgroundColor: '#F4F0FF' },
+  }}
+/>
+```
+
+Slots: `messageRow`, `userBubble`, `assistantBubble`, `userText`, `avatar`, `listContent`, `composer`, `composerBox`, `input`, `suggestionChip`, `suggestionText`.
+
+**3. Swap in your own components**
+
+```tsx
+<ChatView
+  {...chat}
+  renderAvatar={(m) => (m.role === 'assistant' ? <Image source={botLogo} style={{ width: 28, height: 28 }} /> : null)}
+  renderToolCall={(part) =>
+    part.name === 'search_flights' && part.state === 'done' ? <FlightResults data={part.result} /> : undefined // undefined = default card
+  }
+  renderTypingIndicator={() => <LottieView source={thinking} autoPlay loop style={{ height: 24 }} />}
+  renderSendButton={({ onPress, disabled }) => <MySendButton onPress={onPress} disabled={disabled} />}
+  renderStopButton={({ onPress }) => <MyStopButton onPress={onPress} />}
+  composerProps={{ accessoryLeft: <AttachButton />, accessoryRight: <MicButton /> }}
+  emptyState={<MyWelcome />}
+  header={<MyHeader />}
+/>
+```
+
+History rows too: `<ChatHistory renderItem={({ session, active, onPress, onDelete }) => <MyRow … />} />`.
+
+**4. Full control**: `renderMessage` replaces a whole message, or build your own screen from `useChat`, `StreamingMarkdown`, `MessageBubble`, `Composer`, `ToolCallCard` and `TypingIndicator`. Use `useChatTheme()` and `fontStyle(theme)` to match the kit's look in your own components.
 
 ## Chat history (previous conversations)
 

@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import { Platform } from 'react-native';
+import { Platform, type TextStyle } from 'react-native';
 
 export type ChatTheme = {
   colors: {
@@ -30,6 +30,13 @@ export type ChatTheme = {
   lineHeight: number;
   radius: number;
   monoFont: string;
+  /** Font for all chat text. Load it first (e.g. expo-font). Undefined = system font. */
+  fontFamily?: string;
+  /**
+   * Bold variant of `fontFamily`. Custom fonts usually ship bold as a separate
+   * family (e.g. 'Inter-Bold'); Android won't synthesize it from fontWeight.
+   */
+  fontFamilyBold?: string;
 };
 
 export type ChatThemeOverrides = {
@@ -102,6 +109,15 @@ export function mergeTheme(base: ChatTheme, overrides?: ChatThemeOverrides): Cha
     colors: { ...base.colors, ...overrides.colors },
     syntax: { ...base.syntax, ...overrides.syntax },
   } as ChatTheme;
+}
+
+/** Text style for the theme's font, regular or bold. Use it in your own components too. */
+export function fontStyle(theme: ChatTheme, weight: 'regular' | 'bold' = 'regular'): TextStyle {
+  if (weight === 'bold') {
+    if (theme.fontFamilyBold) return { fontFamily: theme.fontFamilyBold };
+    return theme.fontFamily ? { fontFamily: theme.fontFamily, fontWeight: '700' } : { fontWeight: '700' };
+  }
+  return theme.fontFamily ? { fontFamily: theme.fontFamily } : {};
 }
 
 export const ChatThemeContext = createContext<ChatTheme>(lightTheme);

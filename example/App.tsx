@@ -13,6 +13,9 @@ import {
   darkTheme,
   lightTheme,
   useChatSessions,
+  type ChatStyles,
+  type ChatThemeOverrides,
+  type ToolCallPart,
 } from 'react-native-ai-chat-kit';
 
 // Set EXPO_PUBLIC_CHAT_URL to your backend to stream real responses.
@@ -21,6 +24,36 @@ const CHAT_URL = process.env.EXPO_PUBLIC_CHAT_URL;
 
 // Conversations are saved on the device, so they survive app restarts.
 const store = createKeyValueStore(AsyncStorage);
+
+// ---- Customization demo (🎨 button): a brand look built only from public props ----
+const BRAND = '#7C3AED';
+const brandTheme: ChatThemeOverrides = {
+  colors: { accent: BRAND, userBubble: BRAND, userText: '#FFFFFF', link: BRAND, assistantBubble: '#F4F0FF', assistantText: '#1F1633' },
+  radius: 8,
+};
+const brandStyles: ChatStyles = {
+  composerBox: { borderColor: BRAND, borderWidth: 1.5 },
+  suggestionChip: { borderColor: BRAND, backgroundColor: '#F4F0FF' },
+  suggestionText: { color: BRAND, fontWeight: '600' },
+};
+
+function Avatar({ label, color }: { label: string; color: string }) {
+  return (
+    <View style={[styles.avatar, { backgroundColor: color }]}>
+      <Text style={styles.avatarText}>{label}</Text>
+    </View>
+  );
+}
+
+function FlightCard({ part }: { part: ToolCallPart }) {
+  const found = (part.result as { found?: number } | undefined)?.found;
+  return (
+    <View style={styles.flightCard}>
+      <Text style={styles.flightTitle}>✈️  {part.state === 'running' ? 'Searching flights…' : `${found ?? 0} flights found`}</Text>
+      <Text style={styles.flightSub}>Delhi → Goa · Next Friday</Text>
+    </View>
+  );
+}
 
 export default function App() {
   return (
@@ -36,6 +69,7 @@ function Demo() {
   const [scheme, setScheme] = useState<'light' | 'dark'>(system === 'dark' ? 'dark' : 'light');
   const colors = (scheme === 'dark' ? darkTheme : lightTheme).colors;
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [branded, setBranded] = useState(false);
 
   const transport = useMemo(
     () => (CHAT_URL ? createStreamTransport({ url: CHAT_URL }) : createMockTransport()),
@@ -55,6 +89,23 @@ function Demo() {
         onCopyCode={(code) => Clipboard.setStringAsync(code)}
         onCopyMessage={(text) => Clipboard.setStringAsync(text)}
         bottomInset={insets.bottom}
+        {...(branded && {
+          theme: scheme === 'light' ? brandTheme : { colors: { accent: BRAND, userBubble: BRAND, link: '#A78BFA' }, radius: 8 },
+          styles: brandStyles,
+          renderAvatar: (m) => (m.role === 'assistant' ? <Avatar label="AI" color={BRAND} /> : null),
+          renderToolCall: (part) => (part.name === 'search_flights' ? <FlightCard part={part} /> : undefined),
+          renderSendButton: ({ onPress, disabled }) => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+              onPress={onPress}
+              disabled={disabled}
+              style={[styles.brandSend, { opacity: disabled ? 0.4 : 1 }]}
+            >
+              <Text style={styles.brandSendText}>Send</Text>
+            </Pressable>
+          ),
+        })}
         header={
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
             <HeaderButton label="☰" color={colors.text} accessibilityLabel="Chat history" onPress={() => setHistoryOpen(true)} />
@@ -62,6 +113,7 @@ function Demo() {
               {activeTitle}
             </Text>
             <View style={styles.headerActions}>
+              <HeaderButton label="🎨" color={colors.text} accessibilityLabel="Toggle brand style" onPress={() => setBranded(!branded)} />
               <HeaderButton
                 label={scheme === 'dark' ? '☀︎' : '☾'}
                 color={colors.text}
@@ -172,4 +224,11 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', gap: 14 },
   headerButton: { paddingHorizontal: 6, minWidth: 28, alignItems: 'center' },
   historyTop: { flexDirection: 'row', paddingHorizontal: 10 },
+  avatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+  flightCard: { marginVertical: 6, padding: 12, borderRadius: 10, backgroundColor: '#EDE7FF', borderLeftWidth: 4, borderLeftColor: BRAND },
+  flightTitle: { fontSize: 15, fontWeight: '700', color: '#1F1633' },
+  flightSub: { fontSize: 13, color: '#5B4B8A', marginTop: 2 },
+  brandSend: { backgroundColor: BRAND, borderRadius: 8, paddingHorizontal: 14, height: 34, justifyContent: 'center' },
+  brandSendText: { color: '#FFFFFF', fontWeight: '700' },
 });
