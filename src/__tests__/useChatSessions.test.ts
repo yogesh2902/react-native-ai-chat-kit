@@ -20,7 +20,7 @@ afterEach(async () => {
   renderer = undefined;
 });
 
-async function mount(options: { store: ChatStore; transport: ChatTransport; restoreLastSession?: boolean }) {
+async function mount(options: { store: ChatStore; transport: ChatTransport; restoreLastSession?: boolean; maxAgeDays?: number }) {
   const ref: { current: UseChatSessionsResult | null } = { current: null };
   function Harness() {
     ref.current = useChatSessions({ ...options, streamingSaveIntervalMs: 20 });
@@ -181,5 +181,51 @@ describe('useChatSessions', () => {
     await settle();
     expect((await store.load(id))!.title).toBe('My trip');
     expect(chat.current.sessions[0]!.title).toBe('My trip');
+  });
+
+  describe('deleting old chats', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const saved = (id: string, daysAgo: number) => {
+      const t = Date.now() - daysAgo * DAY;
+      const messages = [
+        { id: `${id}-u`, role: 'user' as const, parts: [{ type: 'text' as const, text: id }], createdAt: t, status: 'done' as const },
+      ];
+      return { id, title: id, createdAt: t, updatedAt: t, preview: id, messageCount: 1, messages };
+    };
+
+    it('clearSessions deletes everything, including the open chat', async () => {
+      const store = createMemoryStore([saved('a', 1), saved('b', 2)]);
+      const chat = await mount({ store, transport: echoTransport(), restoreLastSession: true });
+      await until(() => chat.current.activeSessionId === 'a', 'restored a');
+
+      await act(() => chat.current.clearSessions());
+      expect(chat.current.sessions).toEqual([]);
+      expect(chat.current.messages).toEqual([]);
+      expect(chat.current.activeSessionId).toBeNull();
+      await settle();
+      expect(await store.list()).toEqual([]);
+    });
+
+    it('deleteSessionsOlderThan removes only stale chats', async () => {
+      const store = createMemoryStore([saved('fresh', 1), saved('stale', 40), saved('ancient', 400)]);
+      const chat = await mount({ store, transport: echoTransport() });
+      await until(() => chat.current.sessions.length === 3, 'listed');
+
+      let removed = 0;
+      await act(async () => {
+        removed = await chat.current.deleteSessionsOlderThan(30);
+      });
+      expect(removed).toBe(2);
+      expect(chat.current.sessions.map((s) => s.id)).toEqual(['fresh']);
+      expect((await store.list()).map((s) => s.id)).toEqual(['fresh']);
+    });
+
+    it('maxAgeDays prunes stale chats on startup', async () => {
+      const store = createMemoryStore([saved('fresh', 3), saved('stale', 31)]);
+      const chat = await mount({ store, transport: echoTransport(), maxAgeDays: 30 });
+      await until(() => !chat.current.isLoadingSessions, 'loaded');
+      expect(chat.current.sessions.map((s) => s.id)).toEqual(['fresh']);
+      expect(await store.load('stale')).toBeNull();
+    });
   });
 });

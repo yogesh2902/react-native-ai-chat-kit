@@ -10,6 +10,8 @@ export type UseChatSessionsOptions = UseChatOptions & {
   /** How often to save while a reply is streaming, in ms. Default 1500. */
   streamingSaveIntervalMs?: number;
   generateSessionId?: () => string;
+  /** Automatically delete chats not updated in this many days (checked on mount). */
+  maxAgeDays?: number;
 };
 
 export type UseChatSessionsResult = UseChatResult & {
@@ -24,8 +26,14 @@ export type UseChatSessionsResult = UseChatResult & {
   openSession: (id: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
+  /** Delete every saved chat and start a new one. */
+  clearSessions: () => Promise<void>;
+  /** Delete chats not updated in `days` days. Returns how many were deleted. */
+  deleteSessionsOlderThan: (days: number) => Promise<number>;
   refreshSessions: () => Promise<void>;
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const defaultSessionId = () => `chat_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -175,11 +183,42 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
     [upsertMeta],
   );
 
+  const deleteSessionsOlderThan = useCallback(
+    async (days: number) => {
+      const cutoff = Date.now() - days * DAY_MS;
+      const old = (await storeRef.current.list()).filter((s) => s.updatedAt < cutoff);
+      if (old.length === 0) return 0;
+      const ids = new Set(old.map((s) => s.id));
+      if (activeRef.current && ids.has(activeRef.current.id)) {
+        chatRef.current.stop();
+        switchTo(null);
+      }
+      setSessions((prev) => prev.filter((s) => !ids.has(s.id)));
+      for (const id of ids) await storeRef.current.remove(id);
+      return ids.size;
+    },
+    [switchTo],
+  );
+
+  const clearSessions = useCallback(async () => {
+    chatRef.current.stop();
+    switchTo(null);
+    setSessions([]);
+    const store = storeRef.current;
+    if (store.clear) await store.clear();
+    else for (const s of await store.list()) await store.remove(s.id);
+  }, [switchTo]);
+
   // Load the history list on mount (and optionally reopen the latest chat).
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        const maxAgeDays = optionsRef.current.maxAgeDays;
+        if (maxAgeDays !== undefined && maxAgeDays > 0) {
+          const cutoff = Date.now() - maxAgeDays * DAY_MS;
+          for (const s of await storeRef.current.list()) if (s.updatedAt < cutoff) await storeRef.current.remove(s.id);
+        }
         const list = await storeRef.current.list();
         if (cancelled) return;
         setSessions(list);
@@ -214,6 +253,8 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
     openSession,
     deleteSession,
     renameSession,
+    clearSessions,
+    deleteSessionsOlderThan,
     refreshSessions,
   };
 }

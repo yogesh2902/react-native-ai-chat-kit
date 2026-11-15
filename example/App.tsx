@@ -41,7 +41,7 @@ function Demo() {
     () => (CHAT_URL ? createStreamTransport({ url: CHAT_URL }) : createMockTransport()),
     [],
   );
-  const chat = useChatSessions({ transport, store, restoreLastSession: true });
+  const chat = useChatSessions({ transport, store, restoreLastSession: true, maxAgeDays: 30 });
   const activeTitle = chat.sessions.find((s) => s.id === chat.activeSessionId)?.title ?? 'New chat';
 
   return (
@@ -85,6 +85,7 @@ function Demo() {
             void chat.openSession(id);
           }}
           onDelete={(id) => void chat.deleteSession(id)}
+          onClearAll={() => void chat.clearSessions()}
           onNewChat={() => {
             chat.newSession();
             setHistoryOpen(false);

@@ -22,6 +22,8 @@ export type ChatHistoryProps = ThemeProps & {
   onSelect: (id: string) => void;
   onDelete?: (id: string) => void;
   onNewChat?: () => void;
+  /** Shows a "Clear all chats" button (with confirmation) below the list. */
+  onClearAll?: () => void;
   isLoading?: boolean;
   /** Show a search box. Default true. */
   searchable?: boolean;
@@ -47,6 +49,7 @@ function ChatHistoryInner({
   onSelect,
   onDelete,
   onNewChat,
+  onClearAll,
   isLoading,
   searchable = true,
   title = 'Chats',
@@ -57,6 +60,7 @@ function ChatHistoryInner({
   const theme = useChatTheme();
   const [query, setQuery] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [confirmingClear, setConfirmingClear] = useState(false);
   const sections = useMemo(() => groupSessionsByDate(filterSessions(sessions, query)), [sessions, query]);
   const { colors } = theme;
 
@@ -108,6 +112,47 @@ function ChatHistoryInner({
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <Text style={[styles.empty, { color: colors.textMuted }]}>{query ? 'No matching chats' : emptyText}</Text>
+          }
+          ListFooterComponent={
+            onClearAll && sessions.length > 0 && !query ? (
+              confirmingClear ? (
+                <View style={[styles.clearConfirm, { borderColor: colors.border }]}>
+                  <Text style={{ color: colors.text, fontSize: 14, textAlign: 'center' }}>
+                    {`${sessions.length === 1 ? 'Delete this chat' : `Delete all ${sessions.length} chats`}? This can't be undone.`}
+                  </Text>
+                  <View style={styles.clearActions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel"
+                      onPress={() => setConfirmingClear(false)}
+                      style={[styles.clearButton, { borderColor: colors.border, borderWidth: StyleSheet.hairlineWidth }]}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '600' }}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete all chats"
+                      onPress={() => {
+                        setConfirmingClear(false);
+                        onClearAll();
+                      }}
+                      style={[styles.clearButton, { backgroundColor: colors.danger }]}
+                    >
+                      <Text style={styles.deleteText}>Delete all</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear all chats"
+                  onPress={() => setConfirmingClear(true)}
+                  style={({ pressed }) => [styles.clearLink, { opacity: pressed ? 0.6 : 1 }]}
+                >
+                  <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 14 }}>Clear all chats</Text>
+                </Pressable>
+              )
+            ) : undefined
           }
           renderSectionHeader={({ section }) => (
             <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{section.title}</Text>
@@ -184,5 +229,9 @@ const styles = StyleSheet.create({
   preview: { fontSize: 13, marginTop: 2 },
   delete: { marginLeft: 10, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   deleteText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+  clearLink: { alignSelf: 'center', paddingVertical: 16, paddingHorizontal: 12, marginTop: 12 },
+  clearConfirm: { marginTop: 16, marginHorizontal: 8, padding: 14, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, gap: 12 },
+  clearActions: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
+  clearButton: { borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 15 },
 });

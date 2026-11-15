@@ -144,7 +144,8 @@ function Assistant() {
 }
 ```
 
-- **`useChatSessions`** returns everything `useChat` does, plus `sessions`, `activeSessionId`, `newSession()`, `openSession(id)`, `deleteSession(id)` and `renameSession(id, title)`.
+- **`useChatSessions`** returns everything `useChat` does, plus `sessions`, `activeSessionId`, `newSession()`, `openSession(id)`, `deleteSession(id)`, `renameSession(id, title)`, `clearSessions()` and `deleteSessionsOlderThan(days)`.
+- **Clean up old chats**: delete one by long-pressing it, wipe everything with `clearSessions()` (pass it as `onClearAll` to show a "Clear all chats" button with confirmation), or set `maxAgeDays: 30` to auto-delete stale chats on startup.
 - Titles come from the first message, and previews from the last one.
 - Saving happens on every reply, and is throttled while tokens stream, so nothing is lost if the app is killed mid-answer.
 - Switching chats mid-reply stops the reply and saves what arrived so far.
