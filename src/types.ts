@@ -16,9 +16,47 @@ export type ToolCallPart = {
   error?: string;
 };
 
-export type ImagePart = { type: 'image'; uri: string; width?: number; height?: number };
+export type ImagePart = {
+  type: 'image';
+  uri: string;
+  width?: number;
+  height?: number;
+  mimeType?: string;
+  /** Image data sent to the model (already optimized). */
+  base64?: string;
+  name?: string;
+};
 
-export type MessagePart = TextPart | ToolCallPart | ImagePart;
+export type FilePart = {
+  type: 'file';
+  name: string;
+  mimeType: string;
+  size?: number;
+  uri?: string;
+  /** For PDFs: data sent to the model. */
+  base64?: string;
+  /** For text documents (txt, md, csv, json…): the contents, inlined into the prompt. */
+  text?: string;
+};
+
+export type MessagePart = TextPart | ToolCallPart | ImagePart | FilePart;
+
+/** An image or document picked in the composer, ready to send. */
+export type ChatAttachment = {
+  id: string;
+  kind: 'image' | 'file';
+  uri: string;
+  name: string;
+  mimeType: string;
+  /** Bytes after optimization. */
+  size?: number;
+  /** Bytes before optimization (images). */
+  originalSize?: number;
+  width?: number;
+  height?: number;
+  base64?: string;
+  text?: string;
+};
 
 export type MessageStatus = 'streaming' | 'done' | 'error' | 'stopped';
 

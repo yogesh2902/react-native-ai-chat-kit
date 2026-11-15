@@ -1,14 +1,41 @@
-import { getMessageText, type ChatChunk, type ChatMessage, type ChatTransport } from '../types';
+import type { ChatChunk, ChatMessage, ChatTransport } from '../types';
 import { createAsyncQueue } from './asyncQueue';
 import { createSSEDecoder, parseAuto, type StreamParser } from './parsers';
 
-export type SimpleMessage = { role: ChatMessage['role']; content: string };
+export type SimpleAttachment = { mimeType: string; data: string; name?: string };
+export type SimpleMessage = { role: ChatMessage['role']; content: string; attachments?: SimpleAttachment[] };
 
-/** Convert rich messages to the `{ role, content }` shape most backends expect. */
+const SENDABLE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']);
+
+/**
+ * Convert rich messages to the `{ role, content, attachments? }` shape the
+ * server handler and provider adapters expect. Images and PDFs become base64
+ * attachments; text documents are inlined into `content`.
+ */
 export function toSimpleMessages(messages: ChatMessage[]): SimpleMessage[] {
-  return messages
-    .map((m) => ({ role: m.role, content: getMessageText(m) }))
-    .filter((m) => m.content.length > 0);
+  const out: SimpleMessage[] = [];
+  for (const m of messages) {
+    const texts: string[] = [];
+    const attachments: SimpleAttachment[] = [];
+    for (const part of m.parts) {
+      if (part.type === 'text') texts.push(part.text);
+      else if (part.type === 'image') {
+        if (part.base64) attachments.push({ mimeType: part.mimeType ?? 'image/jpeg', data: part.base64, ...(part.name ? { name: part.name } : {}) });
+        else texts.push('[An image was shared here but is no longer available.]');
+      } else if (part.type === 'file') {
+        if (part.text !== undefined) texts.push(`<document name="${part.name}">\n${part.text}\n</document>`);
+        else if (part.base64 && SENDABLE.has(part.mimeType)) attachments.push({ mimeType: part.mimeType, data: part.base64, name: part.name });
+        else texts.push(`[Attached file "${part.name}" (${part.mimeType}) could not be read.]`);
+      }
+    }
+    // Put documents before the user's own words, which reads best for models.
+    const docs = texts.filter((t) => t.startsWith('<document') || t.startsWith('[A'));
+    const words = texts.filter((t) => !docs.includes(t));
+    const content = [...docs, words.join('')].filter((t) => t.trim()).join('\n\n');
+    if (!content && attachments.length === 0) continue;
+    out.push({ role: m.role, content, ...(attachments.length ? { attachments } : {}) });
+  }
+  return out;
 }
 
 export type StreamTransportOptions = {

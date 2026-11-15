@@ -1,5 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
+import * as Speech from 'expo-speech';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, BackHandler, Easing, Platform, Pressable, StyleSheet, Text, useColorScheme, useWindowDimensions, View } from 'react-native';
@@ -7,13 +11,18 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import {
   ChatHistory,
   ChatView,
+  createExpoAttachmentPickers,
+  createExpoSpeech,
   createKeyValueStore,
   createMockTransport,
+  createWebSpeechRecognizer,
+  isWebSpeechRecognitionAvailable,
   createStreamTransport,
   darkTheme,
   lightTheme,
   useChatSessions,
   type ChatStyles,
+  type SpeechRecognizer,
   type ChatThemeOverrides,
   type ToolCallPart,
 } from 'react-native-ai-chat-kit';
@@ -24,6 +33,47 @@ const CHAT_URL = process.env.EXPO_PUBLIC_CHAT_URL;
 
 // Conversations are saved on the device, so they survive app restarts.
 const store = createKeyValueStore(AsyncStorage);
+
+// Photos, camera and files. Images are resized to 1568px and compressed to JPEG before upload.
+const attachments = createExpoAttachmentPickers({ ImagePicker, DocumentPicker, ImageManipulator });
+
+// Read replies aloud (works in Expo Go).
+const speech = createExpoSpeech(Speech);
+
+// Speech-to-text. Real apps on iOS/Android use createExpoSpeechRecognizer(ExpoSpeechRecognitionModule)
+// from 'expo-speech-recognition', which needs a development build (it isn't in Expo Go).
+// On web we use the browser's recognizer; in Expo Go a demo recognizer types a sample sentence.
+const voice: SpeechRecognizer =
+  Platform.OS === 'web' && isWebSpeechRecognitionAvailable() ? createWebSpeechRecognizer() : createDemoSpeechRecognizer();
+
+function createDemoSpeechRecognizer(): SpeechRecognizer {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let finish: (() => void) | null = null;
+  return {
+    start(cb) {
+      const words = 'Plan a weekend trip to Goa with beaches and good food'.split(' ');
+      let i = 0;
+      finish = () => {
+        if (timer) clearInterval(timer);
+        timer = null;
+        cb.onFinal(words.slice(0, Math.max(i, 1)).join(' '));
+        cb.onEnd();
+        finish = null;
+      };
+      timer = setInterval(() => {
+        i++;
+        if (i >= words.length) finish?.();
+        else cb.onPartial(words.slice(0, i).join(' '));
+      }, 220);
+    },
+    stop: () => finish?.(),
+    abort: () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+      finish = null;
+    },
+  };
+}
 
 // ---- Customization demo (🎨 button): a brand look built only from public props ----
 const BRAND = '#7C3AED';
@@ -89,6 +139,9 @@ function Demo() {
         onCopyCode={(code) => Clipboard.setStringAsync(code)}
         onCopyMessage={(text) => Clipboard.setStringAsync(text)}
         bottomInset={insets.bottom}
+        attachments={attachments}
+        voice={voice}
+        speech={speech}
         {...(branded && {
           theme: scheme === 'light' ? brandTheme : { colors: { accent: BRAND, userBubble: BRAND, link: '#A78BFA' }, radius: 8 },
           styles: brandStyles,

@@ -41,6 +41,8 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - 🎨 **Fully customizable**: theme, custom fonts, per-piece styles, avatars, custom tool cards, send/stop buttons and history rows.
 - 🌗 **Light/dark themes**, fully overridable.
 - ⌨️ Enter-to-send on web/desktop, keyboard-aware on iOS/Android.
+- 📎 **Images & documents** with automatic image optimization, plus 🎙 **voice input** and 🔊 **read-aloud**.
+- 🔑 **Connect any AI in one line**: OpenAI, Claude or Gemini, plus a ready-made secure server.
 - 🗂️ **Chat history**: saved conversations you can reopen and continue, with a ready-made history screen.
 - 🧪 **Mock transport** for demos, tests and building UI without an API key.
 
@@ -74,48 +76,94 @@ export default function Screen() {
 
 ## Connect a real model
 
-> ⚠️ **Never put an OpenAI/Anthropic API key in your app.** Anyone can extract it from the bundle. Stream through your own backend.
-
-### Your backend (Node / Express example)
-
-The kit sends `{ messages: [{ role, content }] }` and understands the provider's SSE stream as-is, so your server can just pipe it through.
-
-**Anthropic (Claude)**
-
-```ts
-app.post('/chat', async (req, res) => {
-  const upstream = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': process.env.ANTHROPIC_API_KEY!,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-5-5',
-      max_tokens: 2048,
-      stream: true,
-      messages: req.body.messages,
-    }),
-  });
-  res.setHeader('Content-Type', 'text/event-stream');
-  for await (const chunk of upstream.body!) res.write(chunk);
-  res.end();
-});
-```
-
-**OpenAI**: same idea, call `/v1/chat/completions` with `stream: true` and pipe the response.
-
-**Vercel AI SDK**: return `result.toUIMessageStreamResponse()`. Text and tool calls are mapped automatically.
-
-### In the app
+### Option A: just a provider and an API key (prototyping)
 
 ```tsx
-const transport = createStreamTransport({
-  url: 'https://your-api.com/chat',
-  headers: async () => ({ Authorization: `Bearer ${await getUserToken()}` }),
+import { createProviderTransport } from 'react-native-ai-chat-kit';
+
+const transport = createProviderTransport({
+  provider: 'anthropic', // 'openai' | 'anthropic' | 'gemini'
+  apiKey: process.env.EXPO_PUBLIC_AI_KEY!,
+  model: 'claude-sonnet-5-5',
+  system: 'You are a friendly travel assistant.',
 });
 ```
+
+With `provider: 'openai'` plus `baseUrl`, it also works with any OpenAI-compatible API: OpenRouter, Groq, Together, Mistral, Ollama, LM Studio and others.
+
+> ⚠️ This bundles your API key into the app, where anyone can extract it. That's fine while prototyping, so it **refuses to run in production builds** unless you pass `dangerouslyAllowApiKeyInApp: true`. Use option B before you ship.
+
+### Option B: the ready-made server (production)
+
+Your key stays on the server. Switching providers is a settings change, not a code change.
+
+**1. Deploy the handler.** It's one file, and it runs on Vercel/Next.js, Cloudflare Workers, Deno, Bun or Node/Express:
+
+```ts
+// app/api/chat/route.ts  (Next.js / Vercel)
+import { createChatHandlerFromEnv } from 'react-native-ai-chat-kit/server';
+
+const handler = createChatHandlerFromEnv(process.env);
+export const POST = handler;
+export const OPTIONS = handler;
+```
+
+Copy-paste templates for Cloudflare and plain Node are in [`templates/server`](templates/server).
+
+**2. Set environment variables** on the server:
+
+| Variable | Example |
+| --- | --- |
+| `AI_PROVIDER` | `openai`, `anthropic` or `gemini` |
+| `AI_API_KEY` | your provider key (or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`) |
+| `AI_MODEL` | e.g. `claude-sonnet-5-5` |
+| `AI_SYSTEM_PROMPT` | optional: the assistant's instructions |
+| `AI_BASE_URL` | optional: an OpenAI-compatible API |
+| `CHAT_ACCESS_TOKEN` | optional: require `Authorization: Bearer <token>` from the app |
+
+**3. Point the app at it:**
+
+```tsx
+const transport = createStreamTransport({ url: 'https://your-app.vercel.app/api/chat' });
+```
+
+The server converts every provider's stream into one format, handles CORS, drops system messages sent by app users (so they can't override your prompt), and limits message and attachment sizes. For more control, use `createChatHandler({ provider, apiKey, model, authorize, transformMessages, … })`, for example to check your own user sessions or add retrieved documents (RAG).
+
+### Option C: your own backend
+
+`createStreamTransport({ url })` understands OpenAI, Anthropic, Gemini and Vercel AI SDK streams as-is, so an existing backend can just pass the stream through.
+
+## Images, documents and voice
+
+```tsx
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as Speech from 'expo-speech';
+import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
+import { createExpoAttachmentPickers, createExpoSpeech, createExpoSpeechRecognizer } from 'react-native-ai-chat-kit';
+
+const attachments = createExpoAttachmentPickers({ ImagePicker, DocumentPicker, ImageManipulator });
+const speech = createExpoSpeech(Speech);
+const voice = createExpoSpeechRecognizer(ExpoSpeechRecognitionModule, { lang: 'en-US' });
+
+<ChatView {...chat} attachments={attachments} voice={voice} speech={speech} />;
+```
+
+- **📎 Photos, camera and files**: a ＋ button opens Photos / Camera / Files, and picked items show as removable previews above the input.
+- **Image optimization**: photos are resized to 1568px on the longest side (the size Claude, GPT and Gemini all handle best) and compressed to JPEG before upload. A 4 MB phone photo usually becomes about 200–400 KB. Tune it with `image: { maxDimension, quality }`.
+- **Documents**: PDFs are sent to the model as files, and text files (txt, md, csv, json, code) are read and given to the model as text.
+- **🎙 Voice input**: the mic shows while the input is empty. Speech becomes text you can review before sending, or set `autoSendVoice` to send it immediately.
+- **🔊 Read aloud**: a Listen button on each reply reads it with markdown and code stripped out. Tap again to stop.
+- Each piece is optional, and you pass in the modules you installed, so the kit adds no native dependencies. All of these work in Expo Go except `expo-speech-recognition`, which needs a [development build](https://docs.expo.dev/develop/development-builds/introduction/). On web, use `createWebSpeechRecognizer()`.
+- Not using Expo modules? Pass your own functions: `attachments={{ pickImages: async () => [...] }}` and `voice={{ start, stop }}`. See `AttachmentPickers`, `SpeechRecognizer` and `TextToSpeech`.
+
+## Expo or React Native CLI?
+
+**Both.** The kit is pure TypeScript with no native code, so it installs the same way in Expo (managed or prebuild) and in React Native CLI apps.
+
+- Chat UI, streaming, markdown, history, customization, server: work everywhere.
+- The optional attachment and voice adapters use Expo modules. In a React Native CLI app, either run `npx install-expo-modules` once to use them, or plug in libraries like `react-native-image-picker` or `@react-native-voice/voice` through the same small interfaces.
 
 ## Customization
 

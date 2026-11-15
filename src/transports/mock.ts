@@ -93,8 +93,30 @@ function recapReply(messages: ChatMessage[]): MockStep[] {
   ];
 }
 
+/** Describes received attachments, so the whole pipeline can be tested without an API key. */
+function attachmentReply(last: ChatMessage): MockStep[] | null {
+  const files = last.parts.filter((p) => p.type === 'image' || p.type === 'file');
+  if (files.length === 0) return null;
+  const kb = (b64?: string) => (b64 ? `${Math.round((b64.length * 3) / 4 / 1024)} KB` : 'no data');
+  const lines = files.map((p) =>
+    p.type === 'image'
+      ? `- 🖼 **Image** ${p.width ?? '?'}×${p.height ?? '?'} px, ${kb(p.base64)} (${p.mimeType ?? 'image'})`
+      : `- 📄 **${p.name}**: ${p.text !== undefined ? `text, ${p.text.length.toLocaleString()} characters` : `${p.mimeType}, ${kb(p.base64)}`}`,
+  );
+  return [
+    {
+      text:
+        `Got ${files.length === 1 ? 'your attachment' : `${files.length} attachments`} (demo mode, so I can't actually look at them):\n\n` +
+        lines.join('\n') +
+        '\n\nWith a real provider (OpenAI, Claude or Gemini), these are sent to the model, which can read and describe them.',
+    },
+  ];
+}
+
 function defaultReply(messages: ChatMessage[]): MockStep[] {
   const last = messages[messages.length - 1];
+  const withFiles = last ? attachmentReply(last) : null;
+  if (withFiles) return withFiles;
   const text = last ? getMessageText(last).toLowerCase() : '';
   if (/before|earlier|previous|remember|recap|summar/.test(text)) return recapReply(messages);
   if (/trip|flight|travel|book|plan/.test(text)) return DEMO_REPLIES[1]!;

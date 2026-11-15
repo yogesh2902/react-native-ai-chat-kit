@@ -4,8 +4,8 @@ import type {
   ChatChunk,
   ChatMessage,
   ChatStatus,
+  ChatAttachment,
   ChatTransport,
-  ImagePart,
   MessagePart,
 } from './types';
 
@@ -18,7 +18,7 @@ export type UseChatOptions = {
   generateId?: () => string;
 };
 
-export type SendOptions = { images?: Omit<ImagePart, 'type'>[] };
+export type SendOptions = { attachments?: ChatAttachment[] };
 
 export type UseChatResult = {
   messages: ChatMessage[];
@@ -137,12 +137,16 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const send = useCallback(
     (text: string, sendOptions?: SendOptions) => {
       const trimmed = text.trim();
-      const images = sendOptions?.images ?? [];
-      if (!trimmed && images.length === 0) return;
+      const attachments = sendOptions?.attachments ?? [];
+      if (!trimmed && attachments.length === 0) return;
       if (controllerRef.current) return; // one response at a time
 
       const makeId = optionsRef.current.generateId ?? defaultId;
-      const parts: MessagePart[] = images.map((img) => ({ type: 'image', ...img }));
+      const parts: MessagePart[] = attachments.map((a): MessagePart =>
+        a.kind === 'image'
+          ? { type: 'image', uri: a.uri, width: a.width, height: a.height, mimeType: a.mimeType, base64: a.base64, name: a.name }
+          : { type: 'file', name: a.name, mimeType: a.mimeType, size: a.size, uri: a.uri, base64: a.base64, text: a.text },
+      );
       if (trimmed) parts.push({ type: 'text', text: trimmed });
 
       const userMessage: ChatMessage = { id: makeId(), role: 'user', parts, createdAt: Date.now(), status: 'done' };

@@ -1,6 +1,7 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,17 +15,26 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { fontStyle, useChatTheme } from '../theme';
-import type { ChatMessage } from '../types';
+import { toSpeakableText } from '../markdown/plainText';
+import { getMessageText, type ChatAttachment, type ChatMessage } from '../types';
 import { ChatThemeProvider, type ThemeProps } from './ChatThemeProvider';
 import { Composer, type ComposerProps } from './Composer';
-import type { ChatStyles, MessageRenderers, SendButtonRenderProps, StopButtonRenderProps } from './customization';
+import type {
+  AttachmentPickers,
+  ChatStyles,
+  MessageRenderers,
+  SendButtonRenderProps,
+  SpeechRecognizer,
+  StopButtonRenderProps,
+  TextToSpeech,
+} from './customization';
 import { MessageBubble } from './MessageBubble';
 import { useKeyboardInset } from './useKeyboardInset';
 
 export type ChatViewProps = ThemeProps & MessageRenderers & {
   messages: ChatMessage[];
   /** `send` from useChat. */
-  send: (text: string) => void;
+  send: (text: string, options?: { attachments?: ChatAttachment[] }) => void;
   stop?: () => void;
   retry?: () => void;
   isStreaming?: boolean;
@@ -38,6 +48,17 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   onCopyMessage?: (text: string) => void;
   onCopyCode?: (code: string) => void;
   onLinkPress?: (url: string) => void;
+
+  /** Image/document sharing. See createExpoAttachmentPickers. */
+  attachments?: AttachmentPickers;
+  /** Max attachments per message. Default 5. */
+  maxAttachments?: number;
+  /** Speech-to-text mic button. See createExpoSpeechRecognizer / createWebSpeechRecognizer. */
+  voice?: SpeechRecognizer;
+  /** Send dictated text automatically when the user stops speaking. */
+  autoSendVoice?: boolean;
+  /** Read replies aloud (adds a Listen button). See createExpoSpeech. */
+  speech?: TextToSpeech;
 
   /** Style overrides for individual pieces (bubbles, input, chips…). */
   styles?: ChatStyles;
@@ -87,6 +108,11 @@ function ChatViewInner({
   renderTypingIndicator,
   renderSendButton,
   renderStopButton,
+  attachments,
+  maxAttachments,
+  voice,
+  autoSendVoice,
+  speech,
 }: Omit<ChatViewProps, keyof ThemeProps>) {
   const theme = useChatTheme();
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -99,6 +125,25 @@ function ChatViewInner({
     for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'assistant') return messages[i]!.id;
     return undefined;
   }, [messages]);
+
+  // Read-aloud: one message at a time; tapping again stops it.
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const onSpeak = useCallback(
+    (message: ChatMessage) => {
+      if (!speech) return;
+      if (speakingId === message.id) {
+        speech.stop();
+        setSpeakingId(null);
+        return;
+      }
+      setSpeakingId(message.id);
+      speech.speak(toSpeakableText(getMessageText(message)), {
+        onDone: () => setSpeakingId((current) => (current === message.id ? null : current)),
+      });
+    },
+    [speech, speakingId],
+  );
+  useEffect(() => () => speech?.stop(), [speech]);
 
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<ChatMessage>) =>
@@ -116,6 +161,8 @@ function ChatViewInner({
           renderToolCall={renderToolCall}
           renderTypingIndicator={renderTypingIndicator}
           styles={custom}
+          onSpeak={speech ? onSpeak : undefined}
+          speaking={item.id === speakingId}
         />
       ),
     [
@@ -130,6 +177,9 @@ function ChatViewInner({
       renderToolCall,
       renderTypingIndicator,
       custom,
+      speech,
+      onSpeak,
+      speakingId,
     ],
   );
 
@@ -147,7 +197,8 @@ function ChatViewInner({
     <>
       {header}
       {empty ? (
-        <View style={styles.empty}>
+        // Tapping empty space closes the keyboard (the message list does this on its own).
+        <Pressable style={styles.empty} onPress={Keyboard.dismiss} accessible={false}>
           {emptyState ?? (
             <Text style={[{ color: theme.colors.text, fontSize: theme.fontSize * 1.4, textAlign: 'center' }, fontStyle(theme, 'bold')]}>
               How can I help?
@@ -171,7 +222,7 @@ function ChatViewInner({
               ))}
             </View>
           ) : null}
-        </View>
+        </Pressable>
       ) : (
         <View style={styles.listWrap}>
           <FlatList
@@ -210,6 +261,10 @@ function ChatViewInner({
         style={custom.composer}
         boxStyle={custom.composerBox}
         inputStyle={custom.input}
+        attachments={attachments}
+        maxAttachments={maxAttachments}
+        voice={voice}
+        autoSendVoice={autoSendVoice}
         {...composerProps}
       />
     </>

@@ -85,14 +85,29 @@ export const parseAISDK: StreamParser = (data) => {
   }
 };
 
+/** Google Gemini `streamGenerateContent?alt=sse` events. */
+export const parseGemini: StreamParser = (data) => {
+  let obj: any;
+  try {
+    obj = JSON.parse(data);
+  } catch {
+    return [];
+  }
+  if (!obj || typeof obj !== 'object') return [];
+  if (obj.error) return [{ type: 'error', message: String(obj.error.message ?? 'Gemini request failed') }];
+  const parts: { text?: string }[] = obj.candidates?.[0]?.content?.parts ?? [];
+  const text = parts.map((p) => (typeof p.text === 'string' ? p.text : '')).join('');
+  return text ? [{ type: 'text-delta', text } ] : [];
+};
+
 /**
  * Auto-detects the format. Tries, in order: this library's format, AI SDK,
- * Anthropic, OpenAI. Non-JSON payloads are treated as raw text.
+ * Anthropic, OpenAI, Gemini. Non-JSON payloads are treated as raw text.
  */
 export const parseAuto: StreamParser = (data, event) => {
   if (data === '[DONE]') return [];
   if (!tryJson(data)) return data ? [{ type: 'text-delta', text: data }] : [];
-  for (const parser of [parseNative, parseAISDK, parseAnthropic, parseOpenAI]) {
+  for (const parser of [parseNative, parseAISDK, parseAnthropic, parseOpenAI, parseGemini]) {
     const chunks = parser(data, event);
     if (chunks.length > 0) return chunks;
   }

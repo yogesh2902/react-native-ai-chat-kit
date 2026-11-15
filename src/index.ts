@@ -13,7 +13,28 @@ export type { SessionGroup } from './sessions/groupSessions';
 // Components
 export { ChatHistory } from './components/ChatHistory';
 export type { ChatHistoryProps, ChatHistoryItemRenderProps } from './components/ChatHistory';
-export type { ChatStyles, MessageRenderers, SendButtonRenderProps, StopButtonRenderProps } from './components/customization';
+export type {
+  AttachmentPickers,
+  ChatStyles,
+  MessageRenderers,
+  SendButtonRenderProps,
+  SpeechRecognizer,
+  SpeechRecognizerCallbacks,
+  StopButtonRenderProps,
+  TextToSpeech,
+} from './components/customization';
+
+// Adapters: attachments (image optimization) and voice
+export {
+  createExpoAttachmentPickers,
+  createExpoSpeech,
+  createExpoSpeechRecognizer,
+  optimizeImage,
+  base64ToUtf8,
+} from './adapters/expo';
+export type { ExpoAttachmentPickersOptions, ImageOptimizationOptions } from './adapters/expo';
+export { createWebSpeechRecognizer, isWebSpeechRecognitionAvailable } from './adapters/web';
+export { toSpeakableText } from './markdown/plainText';
 export { ChatThemeProvider, useResolvedTheme } from './components/ChatThemeProvider';
 export type { ThemeProps } from './components/ChatThemeProvider';
 export { ChatView } from './components/ChatView';
@@ -29,10 +50,14 @@ export type { StreamingMarkdownProps } from './markdown/StreamingMarkdown';
 
 // Transports
 export { createStreamTransport, toSimpleMessages } from './transports/stream';
-export type { StreamTransportOptions, SimpleMessage } from './transports/stream';
+export type { StreamTransportOptions, SimpleMessage, SimpleAttachment } from './transports/stream';
 export { createMockTransport, tokenize } from './transports/mock';
+export { createProviderTransport } from './transports/provider';
+export type { ProviderTransportOptions } from './transports/provider';
+export { buildProviderRequest, PROVIDERS } from './providers';
+export type { ProviderConfig, ProviderName, ProviderMessage } from './providers';
 export type { MockStep, MockTransportOptions } from './transports/mock';
-export { parseAuto, parseNative, parseOpenAI, parseAnthropic, parseAISDK, createSSEDecoder } from './transports/parsers';
+export { parseAuto, parseNative, parseOpenAI, parseAnthropic, parseAISDK, parseGemini, createSSEDecoder } from './transports/parsers';
 export type { StreamParser, SSEEvent } from './transports/parsers';
 
 // Markdown internals (useful for custom renderers)
@@ -58,5 +83,7 @@ export type {
   TextPart,
   ToolCallPart,
   ImagePart,
+  FilePart,
+  ChatAttachment,
   TransportRequest,
 } from './types';

@@ -35,3 +35,36 @@ export type MessageRenderers = {
 
 export type SendButtonRenderProps = { onPress: () => void; disabled: boolean };
 export type StopButtonRenderProps = { onPress: () => void };
+
+/** Callbacks a speech recognizer reports to while the user talks. */
+export type SpeechRecognizerCallbacks = {
+  /** Live transcript while the user is still speaking. */
+  onPartial: (text: string) => void;
+  /** Final transcript. */
+  onFinal: (text: string) => void;
+  onError: (error: Error) => void;
+  /** Listening stopped (after final, error, or stop()). */
+  onEnd: () => void;
+};
+
+/** Speech-to-text for the mic button. See createExpoSpeechRecognizer / createWebSpeechRecognizer. */
+export type SpeechRecognizer = {
+  start: (callbacks: SpeechRecognizerCallbacks) => void | Promise<void>;
+  /** Stop listening and deliver the final transcript. */
+  stop: () => void | Promise<void>;
+  /** Stop without a result. */
+  abort?: () => void;
+};
+
+/** Text-to-speech for the "Listen" button on replies. See createExpoSpeech. */
+export type TextToSpeech = {
+  speak: (text: string, callbacks: { onDone: () => void }) => void;
+  stop: () => void;
+};
+
+/** Functions that open pickers and return ready-to-send attachments. See createExpoAttachmentPickers. */
+export type AttachmentPickers = {
+  pickImages?: () => Promise<import('../types').ChatAttachment[]>;
+  takePhoto?: () => Promise<import('../types').ChatAttachment[]>;
+  pickDocuments?: () => Promise<import('../types').ChatAttachment[]>;
+};

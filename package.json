@@ -1,22 +1,35 @@
 {
   "name": "react-native-ai-chat-kit",
   "version": "0.1.0",
-  "description": "Drop-in AI chat UI for React Native & Expo: smooth streaming markdown, tool-call cards, and a provider-agnostic useChat() hook.",
+  "description": "Drop-in AI chat UI for React Native & Expo: streaming markdown, chat history, image/document sharing, voice, and one-line OpenAI / Claude / Gemini setup.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "react-native": "src/index.ts",
   "source": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "react-native": "./src/index.ts",
+      "default": "./lib/index.js"
+    },
+    "./server": {
+      "types": "./lib/cjs/server/index.d.ts",
+      "default": "./lib/cjs/server/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "src",
     "lib",
+    "templates",
     "!src/__tests__",
     "README.md",
     "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "rm -rf lib && tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "build": "rm -rf lib && tsc -p tsconfig.build.json && tsc -p tsconfig.server.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
@@ -32,7 +45,12 @@
     "openai",
     "anthropic",
     "claude",
-    "chat-ui"
+    "chat-ui",
+    "gemini",
+    "voice",
+    "attachments",
+    "speech-to-text",
+    "server"
   ],
   "license": "MIT",
   "peerDependencies": {

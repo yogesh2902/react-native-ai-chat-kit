@@ -16,7 +16,14 @@ export type MessageBubbleProps = MessageRenderers & {
   onCopyCode?: (code: string) => void;
   onLinkPress?: (url: string) => void;
   styles?: ChatStyles;
+  /** Shows a Listen button that reads the reply aloud. */
+  onSpeak?: (message: ChatMessage) => void;
+  /** This message is being read aloud right now (button shows Stop). */
+  speaking?: boolean;
 };
+
+const formatBytes = (n?: number) =>
+  n === undefined ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 function MessageBubbleImpl({
   message,
@@ -29,6 +36,8 @@ function MessageBubbleImpl({
   renderToolCall,
   renderTypingIndicator,
   styles: custom = {},
+  onSpeak,
+  speaking,
 }: MessageBubbleProps) {
   const theme = useChatTheme();
   const isUser = message.role === 'user';
@@ -85,13 +94,34 @@ function MessageBubbleImpl({
             }
             if (part.type === 'image') {
               const ratio = part.width && part.height ? part.width / part.height : 4 / 3;
+              // Cache files can be cleaned up by the OS; fall back to the saved data.
+              const uri = part.uri || (part.base64 ? `data:${part.mimeType ?? 'image/jpeg'};base64,${part.base64}` : '');
+              if (!uri) return null;
               return (
                 <Image
                   key={i}
-                  source={{ uri: part.uri }}
+                  source={{ uri }}
                   accessibilityIgnoresInvertColors
+                  accessibilityLabel={part.name ?? 'Image'}
                   style={[styles.image, { aspectRatio: ratio, borderRadius: theme.radius * 0.6 }]}
                 />
+              );
+            }
+            if (part.type === 'file') {
+              return (
+                <View key={i} style={[styles.fileChip, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
+                  <Text style={styles.fileIcon}>📄</Text>
+                  <View style={styles.fileText}>
+                    <Text numberOfLines={1} style={[{ color: theme.colors.text, fontSize: 13 }, fontStyle(theme, 'bold')]}>
+                      {part.name}
+                    </Text>
+                    <Text style={[{ color: theme.colors.textMuted, fontSize: 11 }, fontStyle(theme)]}>
+                      {[part.mimeType === 'application/pdf' ? 'PDF' : part.text !== undefined ? 'Text' : 'File', formatBytes(part.size)]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  </View>
+                </View>
               );
             }
             return null;
@@ -112,8 +142,11 @@ function MessageBubbleImpl({
           ) : null}
         </View>
 
-        {!isUser && !streaming && (onCopyMessage || (isLast && onRetry)) ? (
+        {!isUser && !streaming && (onCopyMessage || onSpeak || (isLast && onRetry)) ? (
           <View style={styles.actions}>
+            {onSpeak && getMessageText(message) ? (
+              <ActionButton label={speaking ? '■ Stop' : '🔊 Listen'} onPress={() => onSpeak(message)} />
+            ) : null}
             {onCopyMessage && getMessageText(message) ? (
               <ActionButton label="Copy" onPress={() => onCopyMessage(getMessageText(message))} />
             ) : null}
@@ -155,6 +188,9 @@ const styles = StyleSheet.create({
   assistantBubble: { maxWidth: '100%' },
   assistantPadded: { paddingHorizontal: 14, paddingVertical: 10, alignSelf: 'flex-start', maxWidth: '92%' },
   image: { width: 220, marginBottom: 6 },
+  fileChip: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 6, maxWidth: 260 },
+  fileIcon: { fontSize: 20 },
+  fileText: { flexShrink: 1 },
   errorRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
   actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   action: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },

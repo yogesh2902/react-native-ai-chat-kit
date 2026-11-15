@@ -10,6 +10,12 @@ export type UseChatSessionsOptions = UseChatOptions & {
   /** How often to save while a reply is streaming, in ms. Default 1500. */
   streamingSaveIntervalMs?: number;
   generateSessionId?: () => string;
+  /**
+   * Save image/PDF data with each chat so reopened chats can still discuss them.
+   * Default true. Set false to keep storage small (old attachments then show
+   * as "no longer available" to the model).
+   */
+  persistAttachmentData?: boolean;
   /** Automatically delete chats not updated in this many days (checked on mount). */
   maxAgeDays?: number;
 };
@@ -38,8 +44,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const defaultSessionId = () => `chat_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 /** A message still marked as streaming when saved was interrupted; store it as stopped. */
-function normalize(messages: ChatMessage[]): ChatMessage[] {
-  return messages.map((m) => (m.status === 'streaming' ? { ...m, status: 'stopped' } : m));
+function normalize(messages: ChatMessage[], keepAttachmentData: boolean): ChatMessage[] {
+  return messages.map((m) => {
+    let next = m.status === 'streaming' ? { ...m, status: 'stopped' as const } : m;
+    if (!keepAttachmentData && next.parts.some((p) => (p.type === 'image' || p.type === 'file') && p.base64)) {
+      next = { ...next, parts: next.parts.map((p) => ((p.type === 'image' || p.type === 'file') && p.base64 ? { ...p, base64: undefined } : p)) };
+    }
+    return next;
+  });
 }
 
 /**
@@ -85,7 +97,7 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
       setActiveSessionId(id);
     }
     const active = activeRef.current;
-    const normalized = normalize(messages);
+    const normalized = normalize(messages, optionsRef.current.persistAttachmentData ?? true);
     const session: ChatSession = {
       id: active.id,
       title: active.title ?? deriveTitle(normalized),
