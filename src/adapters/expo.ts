@@ -69,7 +69,9 @@ const bytesOf = (base64: string) => Math.floor((base64.length * 3) / 4) - (base6
 
 /** Decode base64 to a UTF-8 string without relying on TextDecoder (not in every Hermes build). */
 export function base64ToUtf8(base64: string): string {
-  const binary = typeof atob === 'function' ? atob(base64) : '';
+  const decode = (globalThis as { atob?: (data: string) => string }).atob;
+  if (!decode) throw new Error('base64 decoding (atob) is not available in this JavaScript runtime.');
+  const binary = decode(base64);
   let out = '';
   for (let i = 0; i < binary.length; ) {
     const c = binary.charCodeAt(i++);

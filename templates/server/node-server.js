@@ -1,4 +1,4 @@
-// Plain Node.js (18+), no framework: `node --env-file=.env node-server.js`
+// Plain Node.js (18+), no framework: copy env.example to .env, then `node --env-file=.env node-server.js`
 // Express instead? app.post('/chat', toNodeHandler(handler)) and app.options('/chat', toNodeHandler(handler))
 // App: createStreamTransport({ url: 'http://<your-computer-ip>:3000/chat' })
 const http = require('node:http');

@@ -1,5 +1,9 @@
 # react-native-ai-chat-kit
 
+[![npm](https://img.shields.io/npm/v/react-native-ai-chat-kit.svg)](https://www.npmjs.com/package/react-native-ai-chat-kit)
+[![CI](https://github.com/yogesh2902/react-native-ai-chat-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/yogesh2902/react-native-ai-chat-kit/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/react-native-ai-chat-kit.svg)](LICENSE)
+
 **Add a ChatGPT-quality AI chat to your React Native or Expo app in minutes.**
 
 Smooth streaming markdown, tool-call cards, chat history, stop/retry, dark mode, and a `useChat()` hook that works with **OpenAI, Anthropic (Claude), the Vercel AI SDK, or your own backend**.
@@ -108,7 +112,7 @@ export const POST = handler;
 export const OPTIONS = handler;
 ```
 
-Copy-paste templates for Cloudflare and plain Node are in [`templates/server`](templates/server).
+Copy-paste templates for Next.js, Cloudflare and plain Node, plus an `env.example`, are in [`templates/server`](templates/server).
 
 **2. Set environment variables** on the server:
 
