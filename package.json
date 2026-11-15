@@ -1,0 +1,51 @@
+{
+  "name": "react-native-ai-chat-kit",
+  "version": "0.1.0",
+  "description": "Drop-in AI chat UI for React Native & Expo: smooth streaming markdown, tool-call cards, and a provider-agnostic useChat() hook.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "!src/__tests__",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf lib && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "ai",
+    "chat",
+    "chatgpt",
+    "llm",
+    "streaming",
+    "markdown",
+    "openai",
+    "anthropic",
+    "claude",
+    "chat-ui"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.74.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "@types/react-test-renderer": "^19.3.1",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-test-renderer": "^19.3.0",
+    "typescript": "~6.0.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+lib/
+.expo/
+example/node_modules/
+example/.expo/
+dist/
+.DS_Store
