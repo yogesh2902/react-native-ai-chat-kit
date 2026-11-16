@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Fix: the composer's mic button now shows a recognizable microphone icon (it previously looked like a "0").
+
 ## 0.1.0
 
 First release.
