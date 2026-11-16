@@ -6,9 +6,24 @@
 
 **Add a ChatGPT-quality AI chat to your React Native or Expo app in minutes.**
 
-Smooth streaming markdown, tool-call cards, chat history, stop/retry, dark mode, and a `useChat()` hook that works with **OpenAI, Anthropic (Claude), the Vercel AI SDK, or your own backend**.
+Smooth streaming markdown, tool-call cards, chat history, stop/retry, dark mode, and a `useChat()` hook that works with **OpenAI, Anthropic (Claude), Google Gemini, the Vercel AI SDK, or your own backend**.
 
-<!-- TODO: add demo GIF here: docs/demo.gif -->
+<table>
+  <tr>
+    <td align="center" width="25%"><img src="docs/screenshots/01-welcome.png" width="200" alt="Empty chat screen with starter prompt suggestions"><br><sub>Starter suggestions</sub></td>
+    <td align="center" width="25%"><img src="docs/screenshots/02-code-answer.png" width="200" alt="Reply with a syntax-highlighted code block and Copy button"><br><sub>Code with highlighting</sub></td>
+    <td align="center" width="25%"><img src="docs/screenshots/03-tool-card-and-table.png" width="200" alt="Reply with a completed flight-search tool card and a table of flights"><br><sub>Tool cards and tables</sub></td>
+    <td align="center" width="25%"><img src="docs/screenshots/04-photo-attached.png" width="200" alt="Composer with an attached photo preview and a typed question"><br><sub>Photo and file sharing</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="25%"><img src="docs/screenshots/05-photo-optimized.png" width="200" alt="Sent photo in the chat, and a reply listing it as 1568 by 1176 pixels, 114 KB"><br><sub>Photos optimized: 1.5 MB to 114 KB</sub></td>
+    <td align="center" width="25%"><img src="docs/screenshots/06-chat-history.png" width="200" alt="History screen listing today's chats with search and Clear all"><br><sub>Chat history</sub></td>
+    <td align="center" width="25%"><img src="docs/screenshots/07-dark-mode.png" width="200" alt="The flight search conversation in dark mode"><br><sub>Dark mode</sub></td>
+    <td align="center" width="25%"><img src="docs/screenshots/08-custom-theme.png" width="200" alt="Purple custom theme with an AI avatar and a custom flight card"><br><sub>Your brand: colors, avatars, cards</sub></td>
+  </tr>
+</table>
+
+<sub>Real screenshots of the <a href="example">example app</a> (mock mode, no API key). A demo GIF is coming.</sub>
 
 ```tsx
 import { ChatView, useChat, createStreamTransport } from 'react-native-ai-chat-kit';
