@@ -331,11 +331,14 @@ export function Composer({
   );
 }
 
+/** Microphone drawn with plain Views (no icon font or SVG dependency): capsule, U-shaped holder, stand, base. */
 function MicIcon({ color }: { color: string }) {
   return (
-    <View style={styles.micWrap}>
-      <View style={[styles.micBody, { borderColor: color }]} />
+    <View style={styles.micWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <View style={[styles.micCapsule, { backgroundColor: color }]} />
+      <View style={[styles.micHolder, { borderColor: color }]} />
       <View style={[styles.micStand, { backgroundColor: color }]} />
+      <View style={[styles.micBase, { backgroundColor: color }]} />
     </View>
   );
 }
@@ -379,8 +382,19 @@ const styles = StyleSheet.create({
   button: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   arrow: { fontSize: 18, fontWeight: '800', marginTop: -2 },
   stopIcon: { width: 11, height: 11, borderRadius: 2 },
-  micWrap: { alignItems: 'center' },
-  micBody: { width: 9, height: 13, borderRadius: 5, borderWidth: 2 },
-  micStand: { width: 2, height: 4, marginTop: 1 },
+  micWrap: { width: 16, height: 20, alignItems: 'center' },
+  micCapsule: { position: 'absolute', top: 0, width: 8, height: 12, borderRadius: 4 },
+  micHolder: {
+    position: 'absolute',
+    top: 6,
+    width: 14,
+    height: 9,
+    borderWidth: 2,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 7,
+    borderBottomRightRadius: 7,
+  },
+  micStand: { position: 'absolute', top: 15, width: 2, height: 3 },
+  micBase: { position: 'absolute', top: 18, width: 8, height: 2, borderRadius: 1 },
   pulse: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#FFFFFF' },
 });
