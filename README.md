@@ -58,7 +58,9 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - ⏹️ **Stop & Retry**, error states, "scroll to latest" button.
 - 💬 **Starter suggestions** for empty chats, and **follow-up chips** under replies.
 - 👍 **Feedback buttons** with an `onFeedback` callback, and ✎ **edit & resend** for the last message.
-- 🌍 **Translatable**: every label and screen-reader text can be overridden.
+- 🌍 **Translatable** (every label and screen-reader text) with **right-to-left** layout for Arabic, Urdu and Hebrew.
+- 🧱 **Layout presets** (`minimal`, `bubbles`, `compact`), a **rich welcome screen** with starter cards, and a **long-press menu** with your own actions.
+- 🕒 **Timestamps and date separators**, plus an **offline banner** that retries when the connection returns.
 - 🎨 **Fully customizable**: theme, custom fonts, per-piece styles, avatars, custom tool cards, send/stop buttons and history rows.
 - 🌗 **Light/dark themes**, fully overridable.
 - ⌨️ Enter-to-send on web/desktop, keyboard-aware on iOS/Android.
@@ -260,6 +262,41 @@ History rows too: `<ChatHistory renderItem={({ session, active, onPress, onDelet
 - **Follow-up chips**: tappable suggestions under the latest reply; tapping one sends it. They come from the reply stream (a `{ "type": "suggestions", "suggestions": [...] }` event from your backend, or `{ suggestions: [...] }` in a mock script), or from the app: `followUps={(message) => ['Tell me more', 'Summarize']}`. `followUps={false}` hides them.
 - **Translations**: `labels` overrides any of the ~60 strings (buttons, placeholders, history date groups, month names, screen-reader labels). `<ChatHistory labels={…}>` takes the same object, and `defaultLabels` shows every key.
 
+## Layouts, welcome screen, menus and more
+
+```tsx
+<ChatView
+  {...chat}
+  layout="bubbles" // 'minimal' (default) | 'bubbles' | 'compact'
+  welcome={{
+    logo: <Image source={logo} style={{ width: 48, height: 48 }} />,
+    title: "Hi, I'm Trip Buddy",
+    subtitle: 'Ask about flights, hotels or plans',
+    cards: [
+      { icon: '✈️', title: 'Plan a trip', description: 'Flights and ideas for Goa', prompt: 'Plan a trip to Goa' },
+      { icon: '🏨', title: 'Find a hotel', description: 'Near the beach, under ₹5,000' },
+    ],
+  }}
+  messageActions={[
+    { key: 'share', icon: '↗', label: 'Share', inline: true, onPress: (m) => Share.share({ message: getMessageText(m) }) },
+    { key: 'report', icon: '⚑', label: 'Report', destructive: true, onPress: (m) => report(m.id) },
+  ]}
+  allowDelete
+  showTimestamps
+  typingIndicator="text" // 'dots' | 'pulse' | 'text' ("Thinking…")
+  streamingCursor // or your own character, e.g. '●'
+  network={createNetInfoMonitor(NetInfo)} // offline banner + auto-retry
+  direction="rtl" // or 'auto' to follow the app's RTL setting
+/>
+```
+
+- **Layout presets** set the overall look in one prop. `bubbles` puts both sides in bubbles (the user's in your accent color); `compact` tightens spacing and text. Your own `theme` and `styles` still apply on top.
+- **Welcome screen**: logo, greeting, subtitle and tappable starter cards in a two-column grid (or `cardLayout: 'list'`). Plain `suggestions` chips still work too.
+- **Long-press menu**: long-pressing a message opens a sheet with Copy, Edit, your `messageActions` and, with `allowDelete`, Delete (`chat.deleteMessage(id)`). Actions with `inline: true` also show as buttons under replies. When the menu is on, message text isn't selectable, since Copy is in the menu.
+- **Timestamps**: `showTimestamps` adds the time under each message and date separators ("Today", "Yesterday", "12 Nov"). Customize with `formatTime` and the `today`/`yesterday`/`months` labels, or set `dateSeparators` separately.
+- **Offline**: pass a `network` monitor (`createNetInfoMonitor(NetInfo)` from `@react-native-community/netinfo`, or `createWebNetworkMonitor()` on web) to show an offline banner. A reply that failed for lack of network is retried automatically when the connection returns (`autoRetry={false}` to turn that off).
+- **Right-to-left**: `direction="rtl"` mirrors the whole chat for Arabic, Urdu and Hebrew, including bubbles, the composer and tables. `'auto'` (the default) follows `I18nManager.isRTL`.
+
 ## Chat history (previous conversations)
 
 Swap `useChat` for `useChatSessions` and every conversation is saved automatically. Users can reopen any past chat and keep talking: new replies get that chat's full history as context.
@@ -307,7 +344,7 @@ function Assistant() {
 | `onFinish` | `(message) => void` | Assistant finished (or was stopped). Save history here. |
 | `onError` | `(error) => void` | Stream failed. |
 
-Returns `{ messages, status, isStreaming, error, send, stop, retry, clear, setMessages, rateMessage, editMessage }`.
+Returns `{ messages, status, isStreaming, error, send, stop, retry, clear, setMessages, rateMessage, editMessage, deleteMessage }`.
 
 `send(text, { attachments })` also takes attachments from the pickers (see *Images, documents and voice*).
 
@@ -326,7 +363,13 @@ Spread `useChat()` into it, plus:
 | `onFeedback` | Show 👍/👎 under replies and get `(message, rating)` |
 | `followUps` | Create follow-up chips in the app, or `false` to hide them |
 | `allowEdit` | Show Edit on the latest user message (default `true` when `editMessage` is spread in) |
-| `labels` | Translate or reword any UI text |
+| `labels`, `direction` | Translate any UI text; `'rtl'` for right-to-left languages |
+| `layout` | `'minimal'`, `'bubbles'` or `'compact'` |
+| `welcome` | Logo, greeting and starter cards for the empty chat |
+| `messageActions`, `allowDelete` | Long-press menu items (and inline buttons); delete messages |
+| `showTimestamps`, `dateSeparators`, `formatTime` | Message times and day separators |
+| `typingIndicator`, `streamingCursor` | Look of the waiting indicator and the streaming cursor |
+| `network`, `autoRetry` | Offline banner and retry on reconnect |
 | `attachments`, `voice`, `speech` | Photos/files, speech-to-text and read-aloud |
 | `renderMessage` | Render messages yourself |
 | `bottomInset`, `keyboardVerticalOffset` | Safe-area and header offsets |

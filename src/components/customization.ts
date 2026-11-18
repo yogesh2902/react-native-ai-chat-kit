@@ -68,3 +68,54 @@ export type AttachmentPickers = {
   takePhoto?: () => Promise<import('../types').ChatAttachment[]>;
   pickDocuments?: () => Promise<import('../types').ChatAttachment[]>;
 };
+
+/** Overall look of the conversation. */
+export type ChatLayout =
+  /** Answers full-width without a bubble (default). */
+  | 'minimal'
+  /** Both sides in bubbles, user in the accent color. */
+  | 'bubbles'
+  /** Tighter spacing and smaller text for dense screens. */
+  | 'compact';
+
+/** An extra action on a message: shown in the long-press menu, and optionally as a button. */
+export type MessageAction = {
+  key: string;
+  label: string;
+  /** Emoji or short text shown before the label. */
+  icon?: string;
+  onPress: (message: import('../types').ChatMessage) => void;
+  /** Also show it as a button under assistant replies. */
+  inline?: boolean;
+  /** Red text, for things like Report. */
+  destructive?: boolean;
+};
+
+export type WelcomeCard = {
+  title: string;
+  description?: string;
+  /** Emoji or a small element. */
+  icon?: React.ReactNode;
+  /** What gets sent when tapped. Defaults to `title`. */
+  prompt?: string;
+};
+
+/** A richer empty state than plain suggestion chips. */
+export type WelcomeConfig = {
+  logo?: React.ReactNode;
+  title?: string;
+  subtitle?: string;
+  cards?: WelcomeCard[];
+  /** Default 'grid' (two columns). */
+  cardLayout?: 'grid' | 'list';
+};
+
+export type TypingIndicatorStyle = 'dots' | 'pulse' | 'text';
+
+/** Tells the chat whether the device is online. See createNetInfoMonitor / createWebNetworkMonitor. */
+export type NetworkMonitor = {
+  /** Call `onChange` whenever connectivity changes; return an unsubscribe function. */
+  subscribe: (onChange: (online: boolean) => void) => () => void;
+  /** Current state, if known synchronously. */
+  isOnline?: () => boolean | undefined;
+};

@@ -15,7 +15,13 @@ export { ChatHistory } from './components/ChatHistory';
 export type { ChatHistoryProps, ChatHistoryItemRenderProps } from './components/ChatHistory';
 export type {
   AttachmentPickers,
+  ChatLayout,
   ChatStyles,
+  MessageAction,
+  NetworkMonitor,
+  TypingIndicatorStyle,
+  WelcomeCard,
+  WelcomeConfig,
   MessageRenderers,
   SendButtonRenderProps,
   SpeechRecognizer,
@@ -35,7 +41,13 @@ export {
 export type { ExpoAttachmentPickersOptions, ImageOptimizationOptions } from './adapters/expo';
 export { createWebSpeechRecognizer, isWebSpeechRecognitionAvailable } from './adapters/web';
 export { toSpeakableText } from './markdown/plainText';
-export { ChatThemeProvider, useResolvedTheme } from './components/ChatThemeProvider';
+export { ChatThemeProvider, useResolvedTheme, presetTheme } from './components/ChatThemeProvider';
+export { WelcomeScreen } from './components/WelcomeScreen';
+export { MessageMenu } from './components/MessageMenu';
+export type { MessageMenuItem } from './components/MessageMenu';
+export { buildListItems, formatMessageTime, formatDateSeparator } from './components/chatListItems';
+export type { ChatListItem } from './components/chatListItems';
+export { createNetInfoMonitor, createWebNetworkMonitor, isNetworkError } from './adapters/network';
 export type { ThemeProps } from './components/ChatThemeProvider';
 export { ChatView } from './components/ChatView';
 export type { ChatViewProps } from './components/ChatView';
@@ -45,6 +57,7 @@ export { Composer } from './components/Composer';
 export type { ComposerProps } from './components/Composer';
 export { ToolCallCard, humanizeToolName } from './components/ToolCallCard';
 export { TypingIndicator } from './components/TypingIndicator';
+export type { TypingIndicatorProps } from './components/TypingIndicator';
 export { StreamingMarkdown } from './markdown/StreamingMarkdown';
 export type { StreamingMarkdownProps } from './markdown/StreamingMarkdown';
 

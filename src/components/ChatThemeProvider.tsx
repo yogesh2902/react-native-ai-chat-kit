@@ -1,6 +1,10 @@
 import React, { useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import { ChatThemeContext, darkTheme, lightTheme, mergeTheme, type ChatTheme, type ChatThemeOverrides } from '../theme';
+import type { ChatLayout } from './customization';
+import { presetTheme } from './layoutPresets';
+
+export { presetTheme };
 
 export type ThemeProps = {
   /** 'auto' (default) follows the device setting. */
@@ -8,14 +12,14 @@ export type ThemeProps = {
   theme?: ChatThemeOverrides;
 };
 
-export function useResolvedTheme({ colorScheme, theme }: ThemeProps): ChatTheme {
+export function useResolvedTheme({ colorScheme, theme, layout }: ThemeProps & { layout?: ChatLayout }): ChatTheme {
   const system = useColorScheme();
   const scheme = colorScheme === 'light' || colorScheme === 'dark' ? colorScheme : system === 'dark' ? 'dark' : 'light';
-  return useMemo(() => mergeTheme(scheme === 'dark' ? darkTheme : lightTheme, theme), [scheme, theme]);
+  return useMemo(() => mergeTheme(presetTheme(scheme === 'dark' ? darkTheme : lightTheme, layout), theme), [scheme, theme, layout]);
 }
 
 /** Share one theme between ChatView, ChatHistory and your own components. */
-export function ChatThemeProvider({ children, ...props }: ThemeProps & { children: React.ReactNode }) {
+export function ChatThemeProvider({ children, ...props }: ThemeProps & { layout?: ChatLayout; children: React.ReactNode }) {
   const theme = useResolvedTheme(props);
   return <ChatThemeContext.Provider value={theme}>{children}</ChatThemeContext.Provider>;
 }

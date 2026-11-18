@@ -4,7 +4,7 @@ import { useChatLabels } from '../labels';
 import { StreamingMarkdown } from '../markdown/StreamingMarkdown';
 import { fontStyle, useChatTheme } from '../theme';
 import { getMessageText, type ChatMessage } from '../types';
-import type { ChatStyles, MessageRenderers } from './customization';
+import type { ChatLayout, ChatStyles, MessageAction, MessageRenderers, TypingIndicatorStyle } from './customization';
 import { ToolCallCard } from './ToolCallCard';
 import { TypingIndicator } from './TypingIndicator';
 
@@ -27,6 +27,16 @@ export type MessageBubbleProps = MessageRenderers & {
   onEdit?: (message: ChatMessage) => void;
   /** Tapping a follow-up suggestion chip. Chips show only on the latest reply. */
   onSuggestionPress?: (text: string) => void;
+  layout?: ChatLayout;
+  typingIndicator?: TypingIndicatorStyle;
+  /** Character shown at the end of a reply while it streams, e.g. '▍'. */
+  streamingCursor?: string;
+  /** Custom actions shown as buttons under this (assistant) message. */
+  inlineActions?: MessageAction[];
+  /** Long-pressing the bubble (opens the message menu in ChatView). */
+  onLongPress?: (message: ChatMessage) => void;
+  /** Already-formatted time shown under the bubble. */
+  timestamp?: string;
 };
 
 const formatBytes = (n?: number) =>
@@ -48,6 +58,12 @@ function MessageBubbleImpl({
   onFeedback,
   onEdit,
   onSuggestionPress,
+  layout = 'minimal',
+  typingIndicator,
+  streamingCursor,
+  inlineActions,
+  onLongPress,
+  timestamp,
 }: MessageBubbleProps) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -58,22 +74,34 @@ function MessageBubbleImpl({
   const waiting = streaming && (message.parts.length === 0 || (lastPart?.type === 'tool-call' && lastPart.state === 'done'));
 
   if (message.role === 'system') return null;
+  const compact = layout === 'compact';
+  // Long-press opens the menu; native text selection would swallow it, so Copy moves into the menu.
+  const selectable = !onLongPress;
+  const lastTextIndex = (() => {
+    for (let i = message.parts.length - 1; i >= 0; i--) if (message.parts[i]!.type === 'text') return i;
+    return -1;
+  })();
   const avatar = renderAvatar?.(message);
 
   return (
-    <View style={[styles.row, isUser && styles.rowUser, custom.messageRow]}>
+    <View style={[styles.row, compact && styles.rowCompact, isUser && styles.rowUser, custom.messageRow]}>
       {avatar != null ? (
         <View style={[styles.avatar, isUser ? styles.avatarUser : styles.avatarAssistant, custom.avatar]}>{avatar}</View>
       ) : null}
       <View style={[styles.column, isUser ? styles.columnUser : styles.columnAssistant]}>
-        <View
+        <Pressable
+          onLongPress={onLongPress ? () => onLongPress(message) : undefined}
+          delayLongPress={350}
+          disabled={!onLongPress}
+          accessibilityHint={onLongPress ? labels.messageOptions : undefined}
           style={[
             isUser ? styles.userBubble : styles.assistantBubble,
+            isUser && compact && styles.userBubbleCompact,
             {
               backgroundColor: isUser ? theme.colors.userBubble : theme.colors.assistantBubble,
               borderRadius: theme.radius,
             },
-            !isUser && theme.colors.assistantBubble !== 'transparent' && styles.assistantPadded,
+            !isUser && theme.colors.assistantBubble !== 'transparent' && (compact ? styles.assistantPaddedCompact : styles.assistantPadded),
             isUser ? custom.userBubble : custom.assistantBubble,
           ]}
         >
@@ -82,7 +110,7 @@ function MessageBubbleImpl({
               return isUser ? (
                 <Text
                   key={i}
-                  selectable
+                  selectable={selectable}
                   style={[{ color, fontSize: theme.fontSize, lineHeight: theme.lineHeight }, fontStyle(theme), custom.userText]}
                 >
                   {part.text}
@@ -94,8 +122,11 @@ function MessageBubbleImpl({
                   color={color}
                   onCopyCode={onCopyCode}
                   onLinkPress={onLinkPress}
+                  selectable={selectable}
                 >
-                  {part.text}
+                  {streaming && streamingCursor && i === lastTextIndex && i === message.parts.length - 1
+                    ? part.text.replace(/\s+$/, '') + streamingCursor
+                    : part.text}
                 </StreamingMarkdown>
               );
             }
@@ -138,7 +169,7 @@ function MessageBubbleImpl({
             return null;
           })}
 
-          {waiting ? (renderTypingIndicator ? renderTypingIndicator() : <TypingIndicator />) : null}
+          {waiting ? (renderTypingIndicator ? renderTypingIndicator() : <TypingIndicator variant={typingIndicator} />) : null}
 
           {message.status === 'error' ? (
             <View style={styles.errorRow}>
@@ -151,7 +182,11 @@ function MessageBubbleImpl({
           {message.status === 'stopped' ? (
             <Text style={[{ color: theme.colors.textMuted, fontSize: theme.fontSize * 0.8, marginTop: 6 }, fontStyle(theme)]}>{labels.stopped}</Text>
           ) : null}
-        </View>
+        </Pressable>
+
+        {timestamp ? (
+          <Text style={[styles.timestamp, { color: theme.colors.textMuted }, fontStyle(theme)]}>{timestamp}</Text>
+        ) : null}
 
         {isUser && onEdit && message.status !== 'streaming' ? (
           <View style={styles.actions}>
@@ -159,7 +194,7 @@ function MessageBubbleImpl({
           </View>
         ) : null}
 
-        {!isUser && !streaming && (onCopyMessage || onSpeak || onFeedback || (isLast && onRetry)) ? (
+        {!isUser && !streaming && (onCopyMessage || onSpeak || onFeedback || inlineActions?.length || (isLast && onRetry)) ? (
           <View style={styles.actions}>
             {onFeedback && message.status !== 'error' ? (
               <>
@@ -183,6 +218,14 @@ function MessageBubbleImpl({
             {onCopyMessage && getMessageText(message) ? (
               <ActionButton label={labels.copy} onPress={() => onCopyMessage(getMessageText(message))} />
             ) : null}
+            {inlineActions?.map((action) => (
+              <ActionButton
+                key={action.key}
+                label={action.icon ? `${action.icon} ${action.label}` : action.label}
+                accessibilityLabel={action.label}
+                onPress={() => action.onPress(message)}
+              />
+            ))}
             {isLast && onRetry ? <ActionButton label={labels.retry} onPress={onRetry} /> : null}
           </View>
         ) : null}
@@ -248,6 +291,8 @@ export const MessageBubble = memo(MessageBubbleImpl);
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 6 },
+  rowCompact: { paddingHorizontal: 12, paddingVertical: 3 },
+  timestamp: { fontSize: 11, marginTop: 4, marginHorizontal: 4 },
   rowUser: { flexDirection: 'row-reverse' },
   column: { flex: 1 },
   columnUser: { alignItems: 'flex-end' },
@@ -256,8 +301,10 @@ const styles = StyleSheet.create({
   avatarUser: { marginLeft: 8 },
   avatarAssistant: { marginRight: 10 },
   userBubble: { maxWidth: '82%', paddingHorizontal: 14, paddingVertical: 9 },
+  userBubbleCompact: { paddingHorizontal: 11, paddingVertical: 6 },
   assistantBubble: { maxWidth: '100%' },
   assistantPadded: { paddingHorizontal: 14, paddingVertical: 10, alignSelf: 'flex-start', maxWidth: '92%' },
+  assistantPaddedCompact: { paddingHorizontal: 11, paddingVertical: 7, alignSelf: 'flex-start', maxWidth: '92%' },
   image: { width: 220, marginBottom: 6 },
   fileChip: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 6, maxWidth: 260 },
   fileIcon: { fontSize: 20 },

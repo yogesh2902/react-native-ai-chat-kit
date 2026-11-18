@@ -248,7 +248,7 @@ function Table({ block, ctx, partial, style }: { block: Extract<Block, { type: '
     <View key={key} style={[styles.row, { borderBottomColor: theme.colors.border, borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth }]}>
       {Array.from({ length: columns }, (_, c) => (
         <View key={c} style={[styles.cell, { width: widths[c] }]}>
-          <Text selectable={ctx.selectable} style={[cellText, header && fontStyle(theme, 'bold'), { textAlign: block.align[c] ?? 'left' }]}>
+          <Text selectable={ctx.selectable} style={[cellText, header && fontStyle(theme, 'bold'), { textAlign: !block.align[c] || block.align[c] === 'left' ? 'auto' : block.align[c] }]}>
             <Inline nodes={parseInline(cells[c] ?? '', partial && isLast)} ctx={ctx} />
           </Text>
         </View>

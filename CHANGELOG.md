@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+Customization
+- **Layout presets**: `layout="minimal" | "bubbles" | "compact"`, applied under your own theme.
+- **Rich welcome screen** (`welcome`): logo, greeting, subtitle and starter cards in a grid or list.
+- **Custom message actions** (`messageActions`) in a long-press menu, optionally inline under replies; Copy, Edit and Delete (`allowDelete`) included. New `deleteMessage(id)` on `useChat`.
+- **Streaming look**: `typingIndicator="dots" | "pulse" | "text"` and `streamingCursor`.
+
+Enhancements
+- **Timestamps and date separators** (`showTimestamps`, `dateSeparators`, `formatTime`).
+- **Offline banner with auto-retry** via a `network` monitor: `createNetInfoMonitor(NetInfo)` or `createWebNetworkMonitor()`.
+- **Right-to-left layout** (`direction`), mirroring bubbles, composer and tables; table cells follow the text direction.
+- New labels: `thinking`, `messageOptions`, `deleteMessage`, `closeMenu`, `offline`, `reconnecting`.
+
 ## 0.2.0
 
 - **Feedback**: 👍/👎 under replies with an `onFeedback` callback; ratings are saved on the message (`message.rating`) and in chat history. New `rateMessage(id, rating)` on `useChat`.
