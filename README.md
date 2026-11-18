@@ -62,7 +62,8 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - 🧱 **Layout presets** (`minimal`, `bubbles`, `compact`), a **rich welcome screen** with starter cards, and a **long-press menu** with your own actions.
 - 🕒 **Timestamps and date separators**, plus an **offline banner** that retries when the connection returns.
 - 🎨 **Fully customizable**: theme, custom fonts, per-piece styles, avatars, custom tool cards, send/stop buttons and history rows.
-- 🌗 **Light/dark themes**, fully overridable.
+- 🌗 **Light/dark themes** and five **color palettes** (neutral, violet, ocean, sunset, forest), fully overridable.
+- ✨ **Polished motion**: messages fade in, follow-ups and welcome cards slide in, the send button pops, tool cards shimmer while working (respects Reduce Motion).
 - ⌨️ Enter-to-send on web/desktop, keyboard-aware on iOS/Android.
 - 📎 **Images & documents** with automatic image optimization, plus 🎙 **voice input** and 🔊 **read-aloud**.
 - 🔑 **Connect any AI in one line**: OpenAI, Claude or Gemini, plus a ready-made secure server.
@@ -262,6 +263,18 @@ History rows too: `<ChatHistory renderItem={({ session, active, onPress, onDelet
 - **Follow-up chips**: tappable suggestions under the latest reply; tapping one sends it. They come from the reply stream (a `{ "type": "suggestions", "suggestions": [...] }` event from your backend, or `{ suggestions: [...] }` in a mock script), or from the app: `followUps={(message) => ['Tell me more', 'Summarize']}`. `followUps={false}` hides them.
 - **Translations**: `labels` overrides any of the ~60 strings (buttons, placeholders, history date groups, month names, screen-reader labels). `<ChatHistory labels={…}>` takes the same object, and `defaultLabels` shows every key.
 
+## Look and feel
+
+```tsx
+<ChatView {...chat} palette="violet" layout="bubbles" />
+```
+
+- **`palette`**: `'neutral'` (default monochrome), `'violet'`, `'ocean'`, `'sunset'` or `'forest'`, each tuned for light and dark mode. Works on `ChatHistory` too, and your `theme` overrides still win.
+- **Motion**: new messages fade and slide in (history loads in place), follow-up chips and welcome cards stagger in, the send button pops when there's something to send, and tool cards shimmer while working. All of it is skipped when the system's Reduce Motion is on, or with `animations={false}`.
+- **Message actions** are a compact icon toolbar under replies (👍 👎 🔊 ⧉ ↻ and your inline actions). Prefer text buttons? `actionsStyle="labels"`.
+- **Composer** floats with a soft shadow and glows in your accent color while typing; code blocks get a window-style header with the language and a Copy button.
+- Build matching pieces with `useChatTheme()`, `fontStyle(theme)` and `withAlpha(color, 0.1)` for tinted backgrounds.
+
 ## Layouts, welcome screen, menus and more
 
 ```tsx
@@ -363,6 +376,8 @@ Spread `useChat()` into it, plus:
 | `onFeedback` | Show 👍/👎 under replies and get `(message, rating)` |
 | `followUps` | Create follow-up chips in the app, or `false` to hide them |
 | `allowEdit` | Show Edit on the latest user message (default `true` when `editMessage` is spread in) |
+| `palette` | `'neutral'`, `'violet'`, `'ocean'`, `'sunset'` or `'forest'` |
+| `actionsStyle`, `animations` | Icon toolbar or text buttons; turn motion off |
 | `labels`, `direction` | Translate any UI text; `'rtl'` for right-to-left languages |
 | `layout` | `'minimal'`, `'bubbles'` or `'compact'` |
 | `welcome` | Logo, greeting and starter cards for the empty chat |

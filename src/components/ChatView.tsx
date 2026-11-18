@@ -120,6 +120,10 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   autoRetry?: boolean;
   /** 'auto' (default) follows the app's RTL setting; 'rtl' mirrors the layout for Arabic, Urdu, Hebrew… */
   direction?: 'ltr' | 'rtl' | 'auto';
+  /** Message actions as a compact icon toolbar ('icons', default) or text buttons ('labels'). */
+  actionsStyle?: 'icons' | 'labels';
+  /** Fade new messages in. Default true (off automatically with Reduce Motion). */
+  animations?: boolean;
 
   /** Fully replace how a message renders. */
   renderMessage?: (message: ChatMessage, index: number) => React.ReactElement | null;
@@ -130,10 +134,10 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   style?: StyleProp<ViewStyle>;
 };
 
-export function ChatView({ colorScheme, theme, labels, ...props }: ChatViewProps) {
+export function ChatView({ colorScheme, theme, palette, labels, ...props }: ChatViewProps) {
   const merged = useMemo(() => mergeLabels(labels), [labels]);
   return (
-    <ChatThemeProvider colorScheme={colorScheme} theme={theme} layout={props.layout}>
+    <ChatThemeProvider colorScheme={colorScheme} theme={theme} palette={palette} layout={props.layout}>
       <ChatLabelsContext.Provider value={merged}>
         <ChatViewInner {...props} />
       </ChatLabelsContext.Provider>
@@ -188,6 +192,8 @@ function ChatViewInner({
   network,
   autoRetry = true,
   direction = 'auto',
+  actionsStyle = 'icons',
+  animations = true,
 }: Omit<ChatViewProps, keyof ThemeProps | 'labels'>) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -199,6 +205,29 @@ function ChatViewInner({
   const withDates = dateSeparators ?? showTimestamps;
   const data = useMemo(() => buildListItems(messages, { dateSeparators: withDates, labels }), [messages, withDates, labels]);
   const indexById = useMemo(() => new Map(messages.map((m, i) => [m.id, i])), [messages]);
+
+  // Animate only messages that just arrived. When many appear at once
+  // (opening a saved chat), they show in place instead of all flying in.
+  // (Keyed by when each id was first seen, so a repeated render pass gives the same answer.)
+  const firstSeen = useRef<Map<string, { at: number; bulk: boolean }> | null>(null);
+  const freshIds = useMemo(() => {
+    const now = Date.now();
+    const initial = !firstSeen.current;
+    if (!firstSeen.current) firstSeen.current = new Map();
+    const seen = firstSeen.current;
+    const added = messages.filter((m) => !seen.has(m.id));
+    const bulk = initial || added.length > 2;
+    for (const m of added) seen.set(m.id, { at: now, bulk });
+    if (!animations) return new Set<string>();
+    return new Set(
+      messages
+        .filter((m) => {
+          const entry = seen.get(m.id);
+          return entry && !entry.bulk && now - entry.at < 600;
+        })
+        .map((m) => m.id),
+    );
+  }, [messages, animations]);
   const cursor = streamingCursor === true ? '▍' : streamingCursor || undefined;
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'assistant') return messages[i]!.id;
@@ -343,6 +372,8 @@ function ChatViewInner({
         renderMessage(item, indexById.get(item.id) ?? 0)
       ) : (
         <MessageBubble
+          animateIn={freshIds.has(item.id)}
+          actionsStyle={actionsStyle}
           layout={layout}
           typingIndicator={typingIndicator}
           streamingCursor={cursor}
@@ -370,6 +401,8 @@ function ChatViewInner({
     [
       theme,
       indexById,
+      freshIds,
+      actionsStyle,
       layout,
       typingIndicator,
       cursor,

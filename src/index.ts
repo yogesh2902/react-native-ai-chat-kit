@@ -83,8 +83,8 @@ export { defaultLabels, mergeLabels, useChatLabels, ChatLabelsContext } from './
 export type { ChatLabels, ChatLabelsOverrides } from './labels';
 
 // Theme
-export { lightTheme, darkTheme, mergeTheme, useChatTheme, ChatThemeContext, fontStyle } from './theme';
-export type { ChatTheme, ChatThemeOverrides } from './theme';
+export { lightTheme, darkTheme, mergeTheme, useChatTheme, ChatThemeContext, fontStyle, applyPalette, PALETTE_NAMES, withAlpha } from './theme';
+export type { ChatTheme, ChatThemeOverrides, ChatPalette } from './theme';
 
 // Types & utils
 export { applyChunk, applyChunks } from './applyChunk';

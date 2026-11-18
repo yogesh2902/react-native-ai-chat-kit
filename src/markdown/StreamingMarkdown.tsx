@@ -196,9 +196,16 @@ function CodeBlock({ code, lang, ctx, style }: { code: string; lang: string; ctx
     kind === 'plain' ? theme.colors.codeText : (theme.syntax as Record<string, string>)[kind] ?? theme.colors.codeText;
 
   return (
-    <View style={[styles.code, style, { backgroundColor: theme.colors.codeBackground, borderRadius: theme.radius * 0.6 }]}>
+    <View style={[styles.code, style, { backgroundColor: theme.colors.codeBackground, borderRadius: theme.radius * 0.7 }]}>
       <View style={[styles.codeHeader, { backgroundColor: theme.colors.codeHeader }]}>
-        <Text style={[styles.codeLang, { fontFamily: theme.monoFont }]}>{lang || 'code'}</Text>
+        <View style={styles.codeTitle}>
+          <View style={styles.dots}>
+            <View style={[styles.dot, { backgroundColor: '#FF5F57' }]} />
+            <View style={[styles.dot, { backgroundColor: '#FEBC2E' }]} />
+            <View style={[styles.dot, { backgroundColor: '#28C840' }]} />
+          </View>
+          <Text style={[styles.codeLang, { fontFamily: theme.monoFont }]}>{lang || 'code'}</Text>
+        </View>
         {ctx.onCopyCode ? (
           <Pressable
             accessibilityRole="button"
@@ -210,7 +217,7 @@ function CodeBlock({ code, lang, ctx, style }: { code: string; lang: string; ctx
               setTimeout(() => setCopied(false), 1500);
             }}
           >
-            <Text style={styles.copy}>{copied ? labels.copied : labels.copy}</Text>
+            <Text style={styles.copy}>{copied ? labels.copied : `⧉ ${labels.copy}`}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -283,7 +290,10 @@ const styles = StyleSheet.create({
   listItem: { flexDirection: 'row', marginTop: 4 },
   marker: { minWidth: 22, paddingRight: 6 },
   listText: { flex: 1 },
-  code: { overflow: 'hidden' },
+  code: { overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  codeTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dots: { flexDirection: 'row', gap: 5 },
+  dot: { width: 9, height: 9, borderRadius: 5, opacity: 0.9 },
   codeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7 },
   codeLang: { color: '#9AA0A8', fontSize: 12 },
   copy: { color: '#C9CDD3', fontSize: 12, fontWeight: '600' },

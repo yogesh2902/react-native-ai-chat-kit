@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+A visual polish release.
+
+- **Color palettes**: `palette="neutral" | "violet" | "ocean" | "sunset" | "forest"` on `ChatView` and `ChatHistory`, tuned for light and dark. New `applyPalette`, `PALETTE_NAMES` and `withAlpha` helpers.
+- **Motion**: new messages fade in (saved history loads in place), follow-up chips and welcome cards stagger in, the send button springs in when ready, and cards scale on press. Honors Reduce Motion; `animations={false}` turns it off.
+- **Icon toolbar** for message actions by default (`actionsStyle="labels"` for the previous text buttons).
+- **Floating composer** with a soft shadow and an accent focus glow.
+- **Tool cards** shimmer while running, with the status in a tinted badge.
+- **Code blocks** get a window-style header with the language and a Copy button.
+- **Welcome screen**: accent glow behind the logo and roomier cards with tinted icon tiles.
+
 ## 0.3.0
 
 Customization

@@ -1,10 +1,11 @@
 import React, { memo } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useChatLabels } from '../labels';
 import { StreamingMarkdown } from '../markdown/StreamingMarkdown';
 import { fontStyle, useChatTheme } from '../theme';
 import { getMessageText, type ChatMessage } from '../types';
 import type { ChatLayout, ChatStyles, MessageAction, MessageRenderers, TypingIndicatorStyle } from './customization';
+import { FadeIn, usePressScale } from './animations';
 import { ToolCallCard } from './ToolCallCard';
 import { TypingIndicator } from './TypingIndicator';
 
@@ -37,6 +38,10 @@ export type MessageBubbleProps = MessageRenderers & {
   onLongPress?: (message: ChatMessage) => void;
   /** Already-formatted time shown under the bubble. */
   timestamp?: string;
+  /** Fade/slide in on mount (for messages that just arrived). */
+  animateIn?: boolean;
+  /** 'icons' (default): compact icon toolbar under replies. 'labels': text buttons. */
+  actionsStyle?: 'icons' | 'labels';
 };
 
 const formatBytes = (n?: number) =>
@@ -64,6 +69,8 @@ function MessageBubbleImpl({
   inlineActions,
   onLongPress,
   timestamp,
+  animateIn = false,
+  actionsStyle = 'icons',
 }: MessageBubbleProps) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -84,7 +91,7 @@ function MessageBubbleImpl({
   const avatar = renderAvatar?.(message);
 
   return (
-    <View style={[styles.row, compact && styles.rowCompact, isUser && styles.rowUser, custom.messageRow]}>
+    <FadeIn animate={animateIn} distance={isUser ? 6 : 10} style={[styles.row, compact && styles.rowCompact, isUser && styles.rowUser, custom.messageRow]}>
       {avatar != null ? (
         <View style={[styles.avatar, isUser ? styles.avatarUser : styles.avatarAssistant, custom.avatar]}>{avatar}</View>
       ) : null}
@@ -195,16 +202,22 @@ function MessageBubbleImpl({
         ) : null}
 
         {!isUser && !streaming && (onCopyMessage || onSpeak || onFeedback || inlineActions?.length || (isLast && onRetry)) ? (
-          <View style={styles.actions}>
+          <View style={[styles.actions, actionsStyle === 'icons' && styles.iconActions]}>
             {onFeedback && message.status !== 'error' ? (
               <>
-                <ActionButton
+                <Action
+                  kind={actionsStyle}
+                  icon="👍"
+                  emoji
                   label="👍"
                   accessibilityLabel={labels.helpful}
                   selected={message.rating === 'up'}
                   onPress={() => onFeedback(message, message.rating === 'up' ? null : 'up')}
                 />
-                <ActionButton
+                <Action
+                  kind={actionsStyle}
+                  icon="👎"
+                  emoji
                   label="👎"
                   accessibilityLabel={labels.notHelpful}
                   selected={message.rating === 'down'}
@@ -213,44 +226,44 @@ function MessageBubbleImpl({
               </>
             ) : null}
             {onSpeak && getMessageText(message) ? (
-              <ActionButton label={speaking ? labels.stopSpeaking : labels.listen} onPress={() => onSpeak(message)} />
+              <Action
+                kind={actionsStyle}
+                icon={speaking ? '■' : '🔊'}
+                emoji={!speaking}
+                selected={speaking}
+                label={speaking ? labels.stopSpeaking : labels.listen}
+                accessibilityLabel={speaking ? labels.stopSpeaking.replace(/^\W+\s*/, '') : labels.listen.replace(/^\W+\s*/, '')}
+                onPress={() => onSpeak(message)}
+              />
             ) : null}
             {onCopyMessage && getMessageText(message) ? (
-              <ActionButton label={labels.copy} onPress={() => onCopyMessage(getMessageText(message))} />
+              <Action kind={actionsStyle} icon="⧉" label={labels.copy} onPress={() => onCopyMessage(getMessageText(message))} />
             ) : null}
             {inlineActions?.map((action) => (
-              <ActionButton
+              <Action
                 key={action.key}
-                label={action.icon ? `${action.icon} ${action.label}` : action.label}
+                kind={action.icon ? actionsStyle : 'labels'}
+                icon={action.icon}
+                label={action.icon && actionsStyle === 'labels' ? `${action.icon} ${action.label}` : action.label}
                 accessibilityLabel={action.label}
                 onPress={() => action.onPress(message)}
               />
             ))}
-            {isLast && onRetry ? <ActionButton label={labels.retry} onPress={onRetry} /> : null}
+            {isLast && onRetry ? <Action kind={actionsStyle} icon="↻" label={labels.retry} onPress={onRetry} /> : null}
           </View>
         ) : null}
 
         {!isUser && isLast && !streaming && onSuggestionPress && message.suggestions?.length ? (
           <View style={styles.suggestions} accessibilityLabel={labels.suggestionsHint}>
-            {message.suggestions.map((suggestion) => (
-              <Pressable
-                key={suggestion}
-                accessibilityRole="button"
-                onPress={() => onSuggestionPress(suggestion)}
-                style={({ pressed }) => [
-                  styles.suggestion,
-                  { borderColor: theme.colors.accent, borderRadius: theme.radius, opacity: pressed ? 0.6 : 1 },
-                ]}
-              >
-                <Text style={[{ color: theme.colors.accent, fontSize: theme.fontSize * 0.85 }, fontStyle(theme, 'bold')]}>
-                  {suggestion}
-                </Text>
-              </Pressable>
+            {message.suggestions.map((suggestion, i) => (
+              <FadeIn key={suggestion} delay={120 + i * 70} distance={6}>
+                <SuggestionChip text={suggestion} onPress={() => onSuggestionPress(suggestion)} />
+              </FadeIn>
             ))}
           </View>
         ) : null}
       </View>
-    </View>
+    </FadeIn>
   );
 }
 
@@ -287,6 +300,71 @@ function ActionButton({
   );
 }
 
+/** One message action, as a compact icon (default) or a labelled pill. */
+function Action({
+  kind,
+  icon,
+  emoji,
+  label,
+  accessibilityLabel,
+  selected,
+  onPress,
+}: {
+  kind: 'icons' | 'labels';
+  icon?: string;
+  emoji?: boolean;
+  label: string;
+  accessibilityLabel?: string;
+  selected?: boolean;
+  onPress: () => void;
+}) {
+  const theme = useChatTheme();
+  if (kind === 'labels' || !icon) {
+    return <ActionButton label={label} accessibilityLabel={accessibilityLabel} selected={selected} onPress={onPress} />;
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={selected === undefined ? undefined : { selected }}
+      hitSlop={6}
+      onPress={onPress}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.iconButton,
+        { backgroundColor: selected || pressed || hovered ? theme.colors.inputBackground : 'transparent' },
+      ]}
+    >
+      <Text
+        style={[
+          styles.iconGlyph,
+          // Emoji can't be tinted, so unselected ones are dimmed instead.
+          emoji ? { opacity: selected ? 1 : 0.5 } : { color: selected ? theme.colors.accent : theme.colors.textMuted },
+        ]}
+      >
+        {icon}
+      </Text>
+    </Pressable>
+  );
+}
+
+function SuggestionChip({ text, onPress }: { text: string; onPress: () => void }) {
+  const theme = useChatTheme();
+  const press = usePressScale(0.95);
+  return (
+    <Animated.View style={press.style}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onPress}
+        onPressIn={press.onPressIn}
+        onPressOut={press.onPressOut}
+        style={[styles.suggestion, { borderColor: theme.colors.accent, backgroundColor: theme.colors.background }]}
+      >
+        <Text style={[{ color: theme.colors.accent, fontSize: theme.fontSize * 0.85 }, fontStyle(theme, 'bold')]}>{text} ›</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export const MessageBubble = memo(MessageBubbleImpl);
 
 const styles = StyleSheet.create({
@@ -313,5 +391,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   action: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  suggestion: { borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
+  suggestion: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
+  iconActions: { gap: 2, marginTop: 4, marginLeft: -6 },
+  iconButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  iconGlyph: { fontSize: 15, fontWeight: '600' },
 });

@@ -25,7 +25,11 @@ import {
   darkTheme,
   lightTheme,
   useChatSessions,
+  useChatTheme,
+  PALETTE_NAMES,
+  applyPalette,
   type ChatLabelsOverrides,
+  type ChatPalette,
   type ChatLayout,
   type MessageAction,
   type WelcomeConfig,
@@ -145,8 +149,14 @@ const labelsFor = { en: undefined, hi: hindi, ar: arabic } as const;
 const LANGUAGE_BUTTON = { en: 'अ', hi: 'ع', ar: 'A' } as const;
 
 // Empty screen with starter cards.
+// Reads the chat theme, so the logo follows the palette and dark mode.
+function DemoLogo() {
+  const theme = useChatTheme();
+  return <Text style={{ fontSize: 40, color: theme.colors.accent }}>✦</Text>;
+}
+
 const welcome: WelcomeConfig = {
-  logo: <Text style={{ fontSize: 40 }}>✦</Text>,
+  logo: <DemoLogo />,
   subtitle: 'Try a card below, or type anything. This demo runs without an API key.',
   cards: [
     { icon: '✈️', title: 'Plan a trip', description: 'Flights and ideas for Goa', prompt: 'Plan a trip to Goa' },
@@ -211,10 +221,12 @@ function Demo() {
   const system = useColorScheme();
   const [scheme, setScheme] = useState<'light' | 'dark'>(system === 'dark' ? 'dark' : 'light');
   const colors = (scheme === 'dark' ? darkTheme : lightTheme).colors;
+  const accent = (p: ChatPalette) => applyPalette(scheme === 'dark' ? darkTheme : lightTheme, p, scheme).colors.accent;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [look, setLook] = useState<Look>('minimal');
   const branded = look === 'brand';
   const [language, setLanguage] = useState<Language>('en');
+  const [palette, setPalette] = useState<ChatPalette>('violet');
 
   const transport = useMemo(
     () => (CHAT_URL ? createStreamTransport({ url: CHAT_URL }) : createMockTransport()),
@@ -233,6 +245,7 @@ function Demo() {
         direction={language === 'ar' ? 'rtl' : 'ltr'}
         placeholder={language === 'en' ? 'Ask anything…' : undefined}
         layout={branded ? 'minimal' : look}
+        palette={palette}
         welcome={welcome}
         showTimestamps
         typingIndicator="text"
@@ -278,6 +291,13 @@ function Demo() {
                 accessibilityLabel="Switch language"
                 onPress={() => setLanguage(LANGUAGES[(LANGUAGES.indexOf(language) + 1) % LANGUAGES.length]!)}
               />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Switch palette"
+                hitSlop={10}
+                onPress={() => setPalette(PALETTE_NAMES[(PALETTE_NAMES.indexOf(palette) + 1) % PALETTE_NAMES.length]!)}
+                style={[styles.paletteDot, { backgroundColor: accent(palette) }]}
+              />
               <HeaderButton
                 label="🎨"
                 color={colors.text}
@@ -300,6 +320,7 @@ function Demo() {
         <ChatHistory
           colorScheme={scheme}
           labels={labelsFor[language]}
+          palette={palette}
           sessions={chat.sessions}
           activeSessionId={chat.activeSessionId}
           isLoading={chat.isLoadingSessions}
@@ -395,6 +416,7 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', gap: 14 },
   headerButton: { paddingHorizontal: 6, minWidth: 28, alignItems: 'center' },
   historyTop: { flexDirection: 'row', paddingHorizontal: 10 },
+  paletteDot: { width: 18, height: 18, borderRadius: 9, alignSelf: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)' },
   avatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   flightCard: { marginVertical: 6, padding: 12, borderRadius: 10, backgroundColor: '#EDE7FF', borderLeftWidth: 4, borderLeftColor: BRAND },
