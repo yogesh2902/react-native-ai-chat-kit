@@ -22,6 +22,7 @@ import { getMessageText, type ChatAttachment, type ChatMessage, type ChatSource,
 import { toReplyReference } from '../useChat';
 import { CodeBlockOptionsContext, type CodeBlockOptions } from '../markdown/StreamingMarkdown';
 import { ModelPicker, type ChatModelOption } from './ModelPicker';
+import { resolveCodeBlocks, resolveReasoning } from './featureSwitches';
 import { buildListItems, formatMessageTime, type ChatListItem } from './chatListItems';
 import { MessageMenu, type MessageMenuItem } from './MessageMenu';
 import { WelcomeScreen } from './WelcomeScreen';
@@ -129,8 +130,11 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   /** Fade new messages in. Default true (off automatically with Reduce Motion). */
   animations?: boolean;
 
-  /** The model's reasoning above replies: 'collapsed' (default, tap to open), 'expanded', or false to hide it. */
-  reasoning?: 'collapsed' | 'expanded' | false;
+  /**
+   * The model's reasoning above replies. `true` or 'collapsed' (default): shown closed, tap to open.
+   * 'expanded': shown open. `false`: hidden.
+   */
+  reasoning?: boolean | 'collapsed' | 'expanded';
   /** Source chips under replies that cite pages. Default true. */
   showSources?: boolean;
   /** Tapping a source chip. Defaults to opening its URL. */
@@ -150,8 +154,11 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   onModelChange?: (id: string) => void;
   /** Show the built-in picker when `models` is set. Default true; set false to place `<ModelPicker>` yourself, e.g. in your header. */
   showModelPicker?: boolean;
-  /** Code block look: highlighting, line numbers, light/dark theme, or your own renderer. */
-  codeBlocks?: CodeBlockOptions;
+  /**
+   * Code block look: highlighting, line numbers, light/dark theme, or your own renderer.
+   * `true` (default) uses the defaults; `false` shows plain code (no colors, no line numbers).
+   */
+  codeBlocks?: boolean | CodeBlockOptions;
   /** Haptic feedback on chat events. See createExpoHaptics. Off unless passed. */
   haptics?: ChatFeedbackHandler;
   /** Sounds on chat events. See createExpoSounds. Off unless passed. */
@@ -278,11 +285,13 @@ function ChatViewInner({
   }, [messages, feedback]);
 
   // Code block options, kept stable so finished blocks don't re-render on every token.
+  const code = typeof codeBlocks === 'object' ? codeBlocks : undefined;
   const codeOptions = useMemo<CodeBlockOptions>(
-    () => codeBlocks ?? {},
+    () => resolveCodeBlocks(codeBlocks),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [codeBlocks?.highlight, codeBlocks?.lineNumbers, codeBlocks?.theme, codeBlocks?.header, codeBlocks?.renderCodeBlock],
+    [codeBlocks === false, code?.highlight, code?.lineNumbers, code?.theme, code?.header, code?.renderCodeBlock],
   );
+  const reasoningMode = resolveReasoning(reasoning);
 
   // Inverted list: newest message sits at offset 0, so streaming text grows
   // upward from the composer and the view stays pinned to the bottom for free.
@@ -526,7 +535,7 @@ function ChatViewInner({
           styles={custom}
           onSpeak={speech ? onSpeak : undefined}
           speaking={item.id === speakingId}
-          reasoning={reasoning}
+          reasoning={reasoningMode}
           showSources={showSources}
           onSourcePress={onSourcePress}
           onSelectVersion={replyVersions && selectVersion && item.id === lastAssistantId && !isStreaming ? handleSelectVersion : undefined}
@@ -575,7 +584,7 @@ function ChatViewInner({
       startEdit,
       followUps,
       handleSuggestion,
-      reasoning,
+      reasoningMode,
       showSources,
       onSourcePress,
       replyVersions,

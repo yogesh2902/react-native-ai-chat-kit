@@ -2,6 +2,7 @@ import React, { createContext, memo, useContext, useMemo, useState } from 'react
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import { useChatLabels } from '../labels';
 import { fontStyle, useChatTheme, type ChatTheme } from '../theme';
+import { resolveCodeBlocks } from '../components/featureSwitches';
 import { highlight } from './highlight';
 import { parseBlocks, parseInline, type Block, type InlineNode } from './parse';
 
@@ -20,6 +21,7 @@ export type CodeBlockOptions = {
 };
 
 export const CodeBlockOptionsContext = createContext<CodeBlockOptions>({});
+
 
 /** GitHub-light style colors for `codeBlocks.theme: 'light'`. */
 export const lightCodeColors = {
@@ -62,8 +64,8 @@ export type StreamingMarkdownProps = {
   /** Called with the code when a code block's Copy button is tapped. Hides the button when omitted. */
   onCopyCode?: (code: string) => void;
   selectable?: boolean;
-  /** Code block options. Defaults to the ones ChatView provides via `codeBlocks`. */
-  codeBlocks?: CodeBlockOptions;
+  /** Code block options (`false` = plain code). Defaults to the ones ChatView provides via `codeBlocks`. */
+  codeBlocks?: boolean | CodeBlockOptions;
 };
 
 type Ctx = {
@@ -93,7 +95,7 @@ export function StreamingMarkdown({
     onLinkPress: onLinkPress ?? ((url) => void Linking.openURL(url).catch(() => {})),
     onCopyCode,
     selectable,
-    code: codeBlocks ?? contextCode,
+    code: codeBlocks === undefined || codeBlocks === true ? contextCode : resolveCodeBlocks(codeBlocks),
   };
 
   return (

@@ -45,8 +45,8 @@ export type MessageBubbleProps = MessageRenderers & {
   animateIn?: boolean;
   /** 'icons' (default): compact icon toolbar under replies. 'labels': text buttons. */
   actionsStyle?: 'icons' | 'labels';
-  /** How the model's reasoning shows: 'collapsed' (default), 'expanded', or false to hide it. */
-  reasoning?: 'collapsed' | 'expanded' | false;
+  /** How the model's reasoning shows: `true` / 'collapsed' (default), 'expanded', or `false` to hide it. */
+  reasoning?: boolean | 'collapsed' | 'expanded';
   /** Show the pages a reply cites. Default true. */
   showSources?: boolean;
   onSourcePress?: (source: ChatSource, index: number) => void;

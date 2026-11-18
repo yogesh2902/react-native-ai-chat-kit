@@ -317,7 +317,7 @@ History rows too: `<ChatHistory renderItem={({ session, active, onPress, onDelet
 
 ## Reasoning, sources, versions, quote reply and more (0.3)
 
-Every feature below is optional. Turn each one on or off with a single prop.
+Every feature below is optional. Turn each one on or off with a single prop, most of them with `true` / `false`.
 
 ```tsx
 import * as Haptics from 'expo-haptics';
@@ -332,7 +332,7 @@ const chat = useChatSessions({ transport, store, model: MODELS[0].id });
 
 <ChatView
   {...chat}
-  reasoning="collapsed" // 'expanded' | false
+  reasoning // true (collapsed) | 'expanded' | false
   showSources // default true
   allowReply // swipe a message (or Reply in its menu) to quote it
   models={MODELS} // model picker above the input
@@ -344,12 +344,12 @@ const chat = useChatSessions({ transport, store, model: MODELS[0].id });
 
 | Feature | Turn on / off | Notes |
 | --- | --- | --- |
-| **Reasoning** | `reasoning="collapsed"` (default), `"expanded"` or `false` | Shows when the model streams reasoning: "Thinking…" with a live preview, then "Thought for 12s". |
+| **Reasoning** | `reasoning={true}` (default, shown collapsed), `"expanded"` or `false` | Shows when the model streams reasoning: "Thinking…" with a live preview, then "Thought for 12s". |
 | **Sources** | `showSources` (default `true`), `onSourcePress` | Numbered chips under replies that cite pages (web search, RAG). |
 | **Reply versions** | `useChat({ keepReplyVersions })` (default `true`), `replyVersions` | Regenerate (↻) keeps old answers; ‹ 2/3 › switches. Each version keeps its own rating. |
 | **Quote reply** | `allowReply` (default `false`) | Swipe right (left in RTL) or long-press → Reply. The quote is sent to the model too. Tap a quote to jump to the original. |
 | **Model picker** | `models`, `showModelPicker` (default `true`) | Picked per chat and saved with history. Put `<ModelPicker>` in your own header with `showModelPicker={false}`. |
-| **Code blocks** | `codeBlocks={{ highlight, lineNumbers, theme, header, renderCodeBlock }}` | JS/TS/JSX, Python, Swift, Kotlin, Java, Go, Rust, SQL, JSON, YAML, CSS, HTML, shell and diffs. `renderCodeBlock` lets you use any highlighter. |
+| **Code blocks** | `codeBlocks={true}` (default), `false` for plain code, or `{{ highlight, lineNumbers, theme, header, renderCodeBlock }}` | JS/TS/JSX, Python, Swift, Kotlin, Java, Go, Rust, SQL, JSON, YAML, CSS, HTML, shell and diffs. `renderCodeBlock` lets you use any highlighter. |
 | **Haptics** | `haptics={createExpoHaptics(Haptics)}` | Off unless passed. Tune per event: `createExpoHaptics(Haptics, { replyDone: 'success', send: null })`. |
 | **Sounds** | `sounds={createExpoSounds(Audio)}` | Off unless passed. Built-in pop/chime/blip, or your own: `{ sounds: { replyDone: require('./ding.mp3') } }`. Respects the silent switch. |
 

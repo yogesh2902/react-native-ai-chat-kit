@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyChunk, applyChunks, settleReasoning } from '../applyChunk';
+import { resolveCodeBlocks, resolveReasoning } from '../components/featureSwitches';
 import { highlight } from '../markdown/highlight';
 import { buildProviderRequest } from '../providers';
 import { createMemoryStore } from '../sessions/store';
@@ -326,5 +327,22 @@ describe('syntax highlighting', () => {
   it('keeps every character of the code', () => {
     const code = 'fn main() { let x = "a#b"; // c\n  x.len() }';
     for (const lang of ['rust', 'python', 'tsx', 'html', 'sql', '']) expect(highlight(code, lang).map((t) => t.text).join('')).toBe(code);
+  });
+});
+
+describe('feature switches', () => {
+  it('reasoning accepts true / false as well as the named modes', () => {
+    expect(resolveReasoning(undefined)).toBe('collapsed');
+    expect(resolveReasoning(true)).toBe('collapsed');
+    expect(resolveReasoning(false)).toBe(false);
+    expect(resolveReasoning('expanded')).toBe('expanded');
+  });
+
+  it('codeBlocks: true = defaults, false = plain code, objects pass through', () => {
+    expect(resolveCodeBlocks(undefined)).toEqual({});
+    expect(resolveCodeBlocks(true)).toEqual({});
+    expect(resolveCodeBlocks(false)).toEqual({ highlight: false, lineNumbers: false });
+    const custom = { lineNumbers: true, theme: 'light' as const };
+    expect(resolveCodeBlocks(custom)).toBe(custom);
   });
 });
