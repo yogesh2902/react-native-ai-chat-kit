@@ -31,7 +31,11 @@ export function toSimpleMessages(messages: ChatMessage[]): SimpleMessage[] {
     // Put documents before the user's own words, which reads best for models.
     const docs = texts.filter((t) => t.startsWith('<document') || t.startsWith('[A'));
     const words = texts.filter((t) => !docs.includes(t));
-    const content = [...docs, words.join('')].filter((t) => t.trim()).join('\n\n');
+    // A quote reply tells the model which earlier message the user means.
+    const quote = m.replyTo?.text.trim()
+      ? `> ${m.replyTo.text.trim().replace(/\n/g, '\n> ')}\n\n(Replying to the quoted ${m.replyTo.role === 'user' ? 'message' : 'part of your answer'} above.)`
+      : '';
+    const content = [...docs, quote, words.join('')].filter((t) => t.trim()).join('\n\n');
     if (!content && attachments.length === 0) continue;
     out.push({ role: m.role, content, ...(attachments.length ? { attachments } : {}) });
   }
@@ -40,11 +44,14 @@ export function toSimpleMessages(messages: ChatMessage[]): SimpleMessage[] {
 
 export type StreamTransportOptions = {
   /** Your backend endpoint. Never call an LLM provider directly with a secret key from a mobile app. */
-  url: string;
+  url: string | ((request: { model?: string }) => string);
   method?: 'POST' | 'PUT';
   headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
-  /** Build the request body. Defaults to `{ messages: [{ role, content }] }`. */
-  body?: (messages: ChatMessage[]) => unknown;
+  /**
+   * Build the request body. Defaults to `{ messages: [{ role, content }], model? }`,
+   * where `model` is the one picked in the model picker (if any).
+   */
+  body?: (messages: ChatMessage[], request: { model?: string }) => unknown;
   /**
    * `sse` (default): Server-Sent Events, parsed with `parser`.
    * `text`: a plain text stream where every byte is assistant text.
@@ -60,10 +67,16 @@ export type StreamTransportOptions = {
  * React Native does not do out of the box.
  */
 export function createStreamTransport(options: StreamTransportOptions): ChatTransport {
-  const { url, method = 'POST', format = 'sse', parser = parseAuto } = options;
-  const buildBody = options.body ?? ((messages: ChatMessage[]) => ({ messages: toSimpleMessages(messages) }));
+  const { method = 'POST', format = 'sse', parser = parseAuto } = options;
+  const buildBody =
+    options.body ??
+    ((messages: ChatMessage[], request: { model?: string }) => ({
+      messages: toSimpleMessages(messages),
+      ...(request.model ? { model: request.model } : {}),
+    }));
 
-  return async function* streamTransport({ messages, signal }) {
+  return async function* streamTransport({ messages, signal, model }) {
+    const url = typeof options.url === 'function' ? options.url({ model }) : options.url;
     const headers =
       typeof options.headers === 'function' ? await options.headers() : options.headers ?? {};
     if (signal.aborted) return;
@@ -112,7 +125,7 @@ export function createStreamTransport(options: StreamTransportOptions): ChatTran
     };
     signal.addEventListener('abort', onAbort, { once: true });
 
-    xhr.send(JSON.stringify(buildBody(messages)));
+    xhr.send(JSON.stringify(buildBody(messages, { model })));
 
     try {
       yield* queue;

@@ -26,7 +26,23 @@ export type ChatTheme = {
     success: string;
     danger: string;
   };
-  syntax: { keyword: string; string: string; comment: string; number: string; fn: string };
+  /** Code block colors per token kind (dark code theme). */
+  syntax: {
+    keyword: string;
+    string: string;
+    comment: string;
+    number: string;
+    fn: string;
+    type: string;
+    property: string;
+    operator: string;
+    punctuation: string;
+    tag: string;
+    attr: string;
+    inserted: string;
+    deleted: string;
+    meta: string;
+  };
   fontSize: number;
   lineHeight: number;
   radius: number;
@@ -69,7 +85,22 @@ export const lightTheme: ChatTheme = {
     success: '#16A34A',
     danger: '#DC2626',
   },
-  syntax: { keyword: '#C792EA', string: '#C3E88D', comment: '#6A7385', number: '#F78C6C', fn: '#82AAFF' },
+  syntax: {
+    keyword: '#C792EA',
+    string: '#C3E88D',
+    comment: '#6A7385',
+    number: '#F78C6C',
+    fn: '#82AAFF',
+    type: '#FFCB6B',
+    property: '#F07178',
+    operator: '#89DDFF',
+    punctuation: '#A6ACCD',
+    tag: '#F07178',
+    attr: '#FFCB6B',
+    inserted: '#C3E88D',
+    deleted: '#FF5370',
+    meta: '#82AAFF',
+  },
   fontSize: 16,
   lineHeight: 24,
   radius: 18,

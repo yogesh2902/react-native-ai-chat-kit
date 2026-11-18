@@ -1,9 +1,57 @@
-import React, { memo, useMemo, useState } from 'react';
+import React, { createContext, memo, useContext, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import { useChatLabels } from '../labels';
 import { fontStyle, useChatTheme, type ChatTheme } from '../theme';
 import { highlight } from './highlight';
 import { parseBlocks, parseInline, type Block, type InlineNode } from './parse';
+
+/** How code blocks look. Pass as `codeBlocks` on ChatView (or StreamingMarkdown). */
+export type CodeBlockOptions = {
+  /** Syntax colors. Default true. */
+  highlight?: boolean;
+  /** Line numbers in a gutter. Default false. */
+  lineNumbers?: boolean;
+  /** 'dark' (default, editor look), 'light', or 'auto' to follow the chat's light/dark mode. */
+  theme?: 'dark' | 'light' | 'auto';
+  /** The header bar with the language and Copy button. Default true. */
+  header?: boolean;
+  /** Render code blocks yourself (e.g. with a full syntax highlighter). Return undefined to use the default. */
+  renderCodeBlock?: (props: { code: string; language: string; streaming: boolean }) => React.ReactNode | undefined;
+};
+
+export const CodeBlockOptionsContext = createContext<CodeBlockOptions>({});
+
+/** GitHub-light style colors for `codeBlocks.theme: 'light'`. */
+export const lightCodeColors = {
+  background: '#F6F8FA',
+  header: '#EAEEF2',
+  text: '#24292F',
+  muted: '#57606A',
+  border: 'rgba(0,0,0,0.08)',
+  syntax: {
+    keyword: '#CF222E',
+    string: '#0A3069',
+    comment: '#6E7781',
+    number: '#0550AE',
+    fn: '#8250DF',
+    type: '#953800',
+    property: '#0550AE',
+    operator: '#CF222E',
+    punctuation: '#24292F',
+    tag: '#116329',
+    attr: '#0550AE',
+    inserted: '#116329',
+    deleted: '#82071E',
+    meta: '#8250DF',
+  } as Record<string, string>,
+};
+
+const isDarkColor = (hex: string) => {
+  const m = /^#([0-9a-f]{6})/i.exec(hex);
+  if (!m) return false;
+  const n = parseInt(m[1]!, 16);
+  return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114 < 140;
+};
 
 export type StreamingMarkdownProps = {
   children: string;
@@ -14,6 +62,8 @@ export type StreamingMarkdownProps = {
   /** Called with the code when a code block's Copy button is tapped. Hides the button when omitted. */
   onCopyCode?: (code: string) => void;
   selectable?: boolean;
+  /** Code block options. Defaults to the ones ChatView provides via `codeBlocks`. */
+  codeBlocks?: CodeBlockOptions;
 };
 
 type Ctx = {
@@ -22,6 +72,7 @@ type Ctx = {
   onLinkPress: (url: string) => void;
   onCopyCode?: (code: string) => void;
   selectable: boolean;
+  code: CodeBlockOptions;
 };
 
 export function StreamingMarkdown({
@@ -31,8 +82,10 @@ export function StreamingMarkdown({
   onLinkPress,
   onCopyCode,
   selectable = true,
+  codeBlocks,
 }: StreamingMarkdownProps) {
   const theme = useChatTheme();
+  const contextCode = useContext(CodeBlockOptionsContext);
   const blocks = useMemo(() => parseBlocks(children), [children]);
   const ctx: Ctx = {
     theme,
@@ -40,6 +93,7 @@ export function StreamingMarkdown({
     onLinkPress: onLinkPress ?? ((url) => void Linking.openURL(url).catch(() => {})),
     onCopyCode,
     selectable,
+    code: codeBlocks ?? contextCode,
   };
 
   return (
@@ -65,6 +119,7 @@ const MemoBlock = memo(BlockView, (a, b) =>
   a.ctx.theme === b.ctx.theme &&
   a.ctx.color === b.ctx.color &&
   !!a.ctx.onCopyCode === !!b.ctx.onCopyCode &&
+  a.ctx.code === b.ctx.code &&
   (a.block.type !== 'code' || b.block.type !== 'code' || a.block.closed === b.block.closed),
 );
 
@@ -121,7 +176,7 @@ function BlockView({ block, partial, ctx, first }: { block: Block; partial: bool
         </View>
       );
     case 'code':
-      return <CodeBlock code={block.code} lang={block.lang} ctx={ctx} style={spacing} />;
+      return <CodeBlock code={block.code} lang={block.lang} ctx={ctx} style={spacing} streaming={partial} />;
     case 'table':
       return <Table block={block} ctx={ctx} partial={partial} style={spacing} />;
     default:
@@ -187,47 +242,72 @@ function Inline({ nodes, ctx }: { nodes: InlineNode[]; ctx: Ctx }) {
   );
 }
 
-function CodeBlock({ code, lang, ctx, style }: { code: string; lang: string; ctx: Ctx; style: any }) {
-  const { theme } = ctx;
+function CodeBlock({ code, lang, ctx, style, streaming }: { code: string; lang: string; ctx: Ctx; style: any; streaming: boolean }) {
+  const { theme, code: options } = ctx;
   const labels = useChatLabels();
   const [copied, setCopied] = useState(false);
-  const tokens = useMemo(() => highlight(code, lang), [code, lang]);
-  const syntaxColor = (kind: string) =>
-    kind === 'plain' ? theme.colors.codeText : (theme.syntax as Record<string, string>)[kind] ?? theme.colors.codeText;
+  const highlightOn = options.highlight !== false;
+  const tokens = useMemo(() => (highlightOn ? highlight(code, lang) : [{ kind: 'plain' as const, text: code }]), [code, lang, highlightOn]);
+  const custom = options.renderCodeBlock?.({ code, language: lang, streaming });
+  if (custom !== undefined) return <View style={style}>{custom}</View>;
+
+  const light = options.theme === 'light' || (options.theme === 'auto' && !isDarkColor(theme.colors.background));
+  const palette = light
+    ? { background: lightCodeColors.background, header: lightCodeColors.header, text: lightCodeColors.text, muted: lightCodeColors.muted, border: lightCodeColors.border, syntax: lightCodeColors.syntax }
+    : { background: theme.colors.codeBackground, header: theme.colors.codeHeader, text: theme.colors.codeText, muted: '#9AA0A8', border: 'rgba(255,255,255,0.06)', syntax: theme.syntax as Record<string, string> };
+  const syntaxColor = (kind: string) => (kind === 'plain' ? palette.text : palette.syntax[kind] ?? palette.text);
+  const fontSize = theme.fontSize * 0.82;
+  const lineHeight = theme.fontSize * 1.3;
+  const lineCount = options.lineNumbers ? code.replace(/\n$/, '').split('\n').length : 0;
 
   return (
-    <View style={[styles.code, style, { backgroundColor: theme.colors.codeBackground, borderRadius: theme.radius * 0.7 }]}>
-      <View style={[styles.codeHeader, { backgroundColor: theme.colors.codeHeader }]}>
-        <View style={styles.codeTitle}>
-          <View style={styles.dots}>
-            <View style={[styles.dot, { backgroundColor: '#FF5F57' }]} />
-            <View style={[styles.dot, { backgroundColor: '#FEBC2E' }]} />
-            <View style={[styles.dot, { backgroundColor: '#28C840' }]} />
+    <View style={[styles.code, style, { backgroundColor: palette.background, borderColor: palette.border, borderRadius: theme.radius * 0.7 }]}>
+      {options.header !== false ? (
+        <View style={[styles.codeHeader, { backgroundColor: palette.header }]}>
+          <View style={styles.codeTitle}>
+            <View style={styles.dots}>
+              <View style={[styles.dot, { backgroundColor: '#FF5F57' }]} />
+              <View style={[styles.dot, { backgroundColor: '#FEBC2E' }]} />
+              <View style={[styles.dot, { backgroundColor: '#28C840' }]} />
+            </View>
+            <Text style={[styles.codeLang, { fontFamily: theme.monoFont, color: palette.muted }]}>{lang || 'code'}</Text>
           </View>
-          <Text style={[styles.codeLang, { fontFamily: theme.monoFont }]}>{lang || 'code'}</Text>
+          {ctx.onCopyCode ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={labels.copyCode}
+              hitSlop={8}
+              onPress={() => {
+                ctx.onCopyCode?.(code);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              <Text style={[styles.copy, { color: light ? palette.text : '#C9CDD3' }]}>{copied ? labels.copied : `⧉ ${labels.copy}`}</Text>
+            </Pressable>
+          ) : null}
         </View>
-        {ctx.onCopyCode ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={labels.copyCode}
-            hitSlop={8}
-            onPress={() => {
-              ctx.onCopyCode?.(code);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-          >
-            <Text style={styles.copy}>{copied ? labels.copied : `⧉ ${labels.copy}`}</Text>
-          </Pressable>
-        ) : null}
-      </View>
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.codeScroll}>
-        <Text
-          selectable={ctx.selectable}
-          style={{ fontFamily: theme.monoFont, fontSize: theme.fontSize * 0.82, lineHeight: theme.fontSize * 1.3, color: theme.colors.codeText }}
-        >
+        {lineCount > 0 ? (
+          <Text
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={[styles.gutter, { fontFamily: theme.monoFont, fontSize, lineHeight, color: palette.muted }]}
+          >
+            {Array.from({ length: lineCount }, (_, i) => String(i + 1)).join('\n')}
+          </Text>
+        ) : null}
+        <Text selectable={ctx.selectable} style={{ fontFamily: theme.monoFont, fontSize, lineHeight, color: palette.text }}>
           {tokens.map((t, i) => (
-            <Text key={i} style={{ color: syntaxColor(t.kind), fontStyle: t.kind === 'comment' ? 'italic' : 'normal' }}>
+            <Text
+              key={i}
+              style={{
+                color: syntaxColor(t.kind),
+                fontStyle: t.kind === 'comment' ? 'italic' : 'normal',
+                backgroundColor: t.kind === 'inserted' ? 'rgba(46,160,67,0.15)' : t.kind === 'deleted' ? 'rgba(248,81,73,0.15)' : undefined,
+              }}
+            >
               {t.text}
             </Text>
           ))}
@@ -290,13 +370,14 @@ const styles = StyleSheet.create({
   listItem: { flexDirection: 'row', marginTop: 4 },
   marker: { minWidth: 22, paddingRight: 6 },
   listText: { flex: 1 },
-  code: { overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  code: { overflow: 'hidden', borderWidth: 1 },
+  gutter: { textAlign: 'right', marginRight: 12, opacity: 0.6 },
   codeTitle: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   dots: { flexDirection: 'row', gap: 5 },
   dot: { width: 9, height: 9, borderRadius: 5, opacity: 0.9 },
   codeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7 },
-  codeLang: { color: '#9AA0A8', fontSize: 12 },
-  copy: { color: '#C9CDD3', fontSize: 12, fontWeight: '600' },
+  codeLang: { fontSize: 12 },
+  copy: { fontSize: 12, fontWeight: '600' },
   codeScroll: { padding: 12 },
   tableScroll: { flexGrow: 0 },
   tableContent: { alignItems: 'flex-start' },

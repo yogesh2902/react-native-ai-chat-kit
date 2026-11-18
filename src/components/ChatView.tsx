@@ -18,7 +18,10 @@ import { ChatLabelsContext, mergeLabels, useChatLabels, type ChatLabelsOverrides
 import { fontStyle, useChatTheme } from '../theme';
 import { toSpeakableText } from '../markdown/plainText';
 import { isNetworkError } from '../adapters/network';
-import { getMessageText, type ChatAttachment, type ChatMessage } from '../types';
+import { getMessageText, type ChatAttachment, type ChatMessage, type ChatSource, type ReplyReference } from '../types';
+import { toReplyReference } from '../useChat';
+import { CodeBlockOptionsContext, type CodeBlockOptions } from '../markdown/StreamingMarkdown';
+import { ModelPicker, type ChatModelOption } from './ModelPicker';
 import { buildListItems, formatMessageTime, type ChatListItem } from './chatListItems';
 import { MessageMenu, type MessageMenuItem } from './MessageMenu';
 import { WelcomeScreen } from './WelcomeScreen';
@@ -26,6 +29,8 @@ import { ChatThemeProvider, type ThemeProps } from './ChatThemeProvider';
 import { Composer, type ComposerProps } from './Composer';
 import type {
   AttachmentPickers,
+  ChatFeedbackEvent,
+  ChatFeedbackHandler,
   ChatLayout,
   ChatStyles,
   MessageAction,
@@ -44,7 +49,7 @@ import { useKeyboardInset } from './useKeyboardInset';
 export type ChatViewProps = ThemeProps & MessageRenderers & {
   messages: ChatMessage[];
   /** `send` from useChat. */
-  send: (text: string, options?: { attachments?: ChatAttachment[] }) => void;
+  send: (text: string, options?: { attachments?: ChatAttachment[]; replyTo?: ReplyReference }) => void;
   stop?: () => void;
   retry?: () => void;
   isStreaming?: boolean;
@@ -124,6 +129,34 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   /** Fade new messages in. Default true (off automatically with Reduce Motion). */
   animations?: boolean;
 
+  /** The model's reasoning above replies: 'collapsed' (default, tap to open), 'expanded', or false to hide it. */
+  reasoning?: 'collapsed' | 'expanded' | false;
+  /** Source chips under replies that cite pages. Default true. */
+  showSources?: boolean;
+  /** Tapping a source chip. Defaults to opening its URL. */
+  onSourcePress?: (source: ChatSource, index: number) => void;
+  /** `selectVersion` from useChat (spread in). Shows ‹ 2/3 › on regenerated replies. Set `replyVersions={false}` to hide it. */
+  selectVersion?: (id: string, index: number) => void;
+  replyVersions?: boolean;
+  /** Quote reply: swipe a message (or pick Reply in its menu) to quote it in the next message. Default false. */
+  allowReply?: boolean;
+  /** Models to choose from. Shows a model picker above the input. Spread `useChat` in for `model` / `setModel`. */
+  models?: ChatModelOption[];
+  /** The selected model id (from useChat). */
+  model?: string;
+  /** Switch the model (from useChat). */
+  setModel?: (id: string) => void;
+  /** Called after the user picks a model. */
+  onModelChange?: (id: string) => void;
+  /** Show the built-in picker when `models` is set. Default true; set false to place `<ModelPicker>` yourself, e.g. in your header. */
+  showModelPicker?: boolean;
+  /** Code block look: highlighting, line numbers, light/dark theme, or your own renderer. */
+  codeBlocks?: CodeBlockOptions;
+  /** Haptic feedback on chat events. See createExpoHaptics. Off unless passed. */
+  haptics?: ChatFeedbackHandler;
+  /** Sounds on chat events. See createExpoSounds. Off unless passed. */
+  sounds?: ChatFeedbackHandler;
+
   /** Fully replace how a message renders. */
   renderMessage?: (message: ChatMessage, index: number) => React.ReactElement | null;
 
@@ -197,17 +230,66 @@ function ChatViewInner({
   direction = 'auto',
   actionsStyle = 'icons',
   animations = true,
+  reasoning = 'collapsed',
+  showSources = true,
+  onSourcePress,
+  selectVersion,
+  replyVersions = true,
+  allowReply = false,
+  models,
+  model,
+  setModel,
+  onModelChange,
+  showModelPicker = true,
+  codeBlocks,
+  haptics,
+  sounds,
 }: Omit<ChatViewProps, keyof ThemeProps | 'labels'>) {
   const theme = useChatTheme();
   const labels = useChatLabels();
   const listRef = useRef<FlatList<ChatListItem>>(null);
+  const latestDataRef = useRef<ChatListItem[]>([]);
   const [showJump, setShowJump] = useState(false);
+
+  // Haptics and sounds share one event stream.
+  const feedbackRef = useRef({ haptics, sounds });
+  feedbackRef.current = { haptics, sounds };
+  const feedback = useCallback((event: ChatFeedbackEvent) => {
+    feedbackRef.current.haptics?.(event);
+    feedbackRef.current.sounds?.(event);
+  }, []);
+
+  // A reply finishing (or failing) is detected from the messages themselves,
+  // so it works with any hook and with stop/retry.
+  const lastStatusRef = useRef<{ id: string; status?: string } | null>(null);
+  useEffect(() => {
+    let last: ChatMessage | undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]!.role === 'assistant') {
+        last = messages[i];
+        break;
+      }
+    }
+    const previous = lastStatusRef.current;
+    lastStatusRef.current = last ? { id: last.id, status: last.status } : null;
+    if (!last || !previous || previous.id !== last.id || previous.status !== 'streaming') return;
+    if (last.status === 'done') feedback('replyDone');
+    else if (last.status === 'error') feedback('error');
+  }, [messages, feedback]);
+
+  // Code block options, kept stable so finished blocks don't re-render on every token.
+  const codeOptions = useMemo<CodeBlockOptions>(
+    () => codeBlocks ?? {},
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [codeBlocks?.highlight, codeBlocks?.lineNumbers, codeBlocks?.theme, codeBlocks?.header, codeBlocks?.renderCodeBlock],
+  );
 
   // Inverted list: newest message sits at offset 0, so streaming text grows
   // upward from the composer and the view stays pinned to the bottom for free.
   const withDates = dateSeparators ?? showTimestamps;
   const data = useMemo(() => buildListItems(messages, { dateSeparators: withDates, labels }), [messages, withDates, labels]);
   const indexById = useMemo(() => new Map(messages.map((m, i) => [m.id, i])), [messages]);
+  latestDataRef.current = data;
 
   // Animate only messages that just arrived. When many appear at once
   // (opening a saved chat), they show in place instead of all flying in.
@@ -245,32 +327,71 @@ function ChatViewInner({
   // Feedback: save the rating on the message (if the hook is spread in) and tell the app.
   const handleFeedback = useCallback(
     (message: ChatMessage, rating: 'up' | 'down' | null) => {
+      feedback('rate');
       rateMessage?.(message.id, rating);
       onFeedback?.(message, rating);
     },
-    [rateMessage, onFeedback],
+    [rateMessage, onFeedback, feedback],
   );
 
   // Edit & resend: the composer switches to edit mode for the chosen message.
   const [editing, setEditing] = useState<{ id: string; key: string; text: string } | null>(null);
+  const [replyingTo, setReplyingTo] = useState<ReplyReference | null>(null);
   const startEdit = useCallback((message: ChatMessage) => {
+    setReplyingTo(null);
     setEditing({ id: message.id, key: `${message.id}:${Date.now()}`, text: getMessageText(message) });
   }, []);
+  const startReply = useCallback((message: ChatMessage) => {
+    setEditing(null);
+    setReplyingTo(toReplyReference(message));
+  }, []);
   useEffect(() => {
-    // The message being edited disappeared (new chat, history switch): leave edit mode.
+    // The message being edited or quoted disappeared (new chat, history switch): leave that mode.
     if (editing && !messages.some((m) => m.id === editing.id)) setEditing(null);
-  }, [messages, editing]);
+    if (replyingTo && !messages.some((m) => m.id === replyingTo.id)) setReplyingTo(null);
+  }, [messages, editing, replyingTo]);
   const handleSend = useCallback(
     (text: string, options?: { attachments?: ChatAttachment[] }) => {
+      feedback('send');
       if (editing && editMessage) {
         editMessage(editing.id, text);
         setEditing(null);
         return;
       }
-      send(text, options);
+      send(text, replyingTo ? { ...options, replyTo: replyingTo } : options);
+      setReplyingTo(null);
     },
-    [editing, editMessage, send],
+    [editing, editMessage, send, replyingTo, feedback],
   );
+  const sendText = useCallback(
+    (text: string) => {
+      feedback('send');
+      send(text);
+    },
+    [send, feedback],
+  );
+
+  // Tapping a quote scrolls to the original and briefly highlights it.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+  }, []);
+  const jumpTo = useCallback((id: string) => {
+    const index = latestDataRef.current.findIndex((item) => item.kind === 'message' && item.message.id === id);
+    if (index < 0) return;
+    listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+    setFlashId(id);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashId(null), 1400);
+  }, []);
+
+  const handleSelectVersion = useCallback(
+    (message: ChatMessage, index: number) => selectVersion?.(message.id, index),
+    [selectVersion],
+  );
+  const dir = direction === 'auto' ? (I18nManager.isRTL ? 'rtl' : 'ltr') : direction;
+  const modelNames = useMemo(() => new Map((models ?? []).map((m) => [m.id, m.name])), [models]);
 
   // Follow-up chips: from the reply's own suggestions, or the app's function.
   const withFollowUps = useCallback(
@@ -283,7 +404,7 @@ function ChatViewInner({
     [followUps],
   );
 
-  const handleSuggestion = useCallback((text: string) => send(text), [send]);
+  const handleSuggestion = sendText;
 
   // Read-aloud: one message at a time; tapping again stops it.
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -310,13 +431,20 @@ function ChatViewInner({
       !messageActions ? [] : typeof messageActions === 'function' ? messageActions(message) : messageActions,
     [messageActions],
   );
-  const menuEnabled = !!messageActions || (allowDelete && !!deleteMessage);
+  const menuEnabled = !!messageActions || (allowDelete && !!deleteMessage) || allowReply;
   const [menuMessage, setMenuMessage] = useState<ChatMessage | null>(null);
-  const openMenu = useCallback((message: ChatMessage) => setMenuMessage(message), []);
+  const openMenu = useCallback(
+    (message: ChatMessage) => {
+      feedback('longPress');
+      setMenuMessage(message);
+    },
+    [feedback],
+  );
   const menuItems: MessageMenuItem[] = useMemo(() => {
     if (!menuMessage) return [];
     const text = getMessageText(menuMessage);
     const items: MessageMenuItem[] = [];
+    if (allowReply && menuMessage.status !== 'streaming') items.push({ key: 'reply', icon: '↩\uFE0E', label: labels.reply, onPress: () => startReply(menuMessage) });
     if (onCopyMessage && text) items.push({ key: 'copy', icon: '⧉', label: labels.copy, onPress: () => onCopyMessage(text) });
     if (menuMessage.role === 'user' && allowEdit && editMessage && menuMessage.id === lastUserId && !isStreaming) {
       items.push({ key: 'edit', icon: '✎', label: labels.edit, onPress: () => startEdit(menuMessage) });
@@ -328,7 +456,7 @@ function ChatViewInner({
       items.push({ key: 'delete', icon: '🗑', label: labels.deleteMessage, destructive: true, onPress: () => deleteMessage(menuMessage.id) });
     }
     return items;
-  }, [menuMessage, onCopyMessage, labels, allowEdit, editMessage, lastUserId, isStreaming, startEdit, actionsFor, allowDelete, deleteMessage]);
+  }, [menuMessage, onCopyMessage, labels, allowEdit, editMessage, lastUserId, isStreaming, startEdit, actionsFor, allowDelete, deleteMessage, allowReply, startReply]);
 
   // Offline banner, and retrying a reply that failed for lack of network once we're back.
   const [online, setOnline] = useState(() => network?.isOnline?.() ?? true);
@@ -398,6 +526,16 @@ function ChatViewInner({
           styles={custom}
           onSpeak={speech ? onSpeak : undefined}
           speaking={item.id === speakingId}
+          reasoning={reasoning}
+          showSources={showSources}
+          onSourcePress={onSourcePress}
+          onSelectVersion={replyVersions && selectVersion && item.id === lastAssistantId && !isStreaming ? handleSelectVersion : undefined}
+          onReply={allowReply && item.status !== 'streaming' ? startReply : undefined}
+          onQuotePress={jumpTo}
+          onFeedbackEvent={feedback}
+          modelName={item.model && models ? modelNames.get(item.model) : undefined}
+          rtl={dir === 'rtl'}
+          highlighted={item.id === flashId}
         />
       );
     },
@@ -437,6 +575,20 @@ function ChatViewInner({
       startEdit,
       followUps,
       handleSuggestion,
+      reasoning,
+      showSources,
+      onSourcePress,
+      replyVersions,
+      selectVersion,
+      handleSelectVersion,
+      allowReply,
+      startReply,
+      jumpTo,
+      feedback,
+      models,
+      modelNames,
+      dir,
+      flashId,
     ],
   );
 
@@ -448,7 +600,6 @@ function ChatViewInner({
   const empty = messages.length === 0;
   const rootRef = useRef<React.ComponentRef<typeof View>>(null);
   const keyboard = useKeyboardInset(rootRef);
-  const dir = direction === 'auto' ? (I18nManager.isRTL ? 'rtl' : 'ltr') : direction;
   const rootStyle = [styles.root, { backgroundColor: theme.colors.background, direction: dir } as const, style];
 
   const body = (
@@ -456,7 +607,7 @@ function ChatViewInner({
       {header}
       {empty && welcome && !emptyState ? (
         <Pressable style={styles.welcome} onPress={Keyboard.dismiss} accessible={false}>
-          <WelcomeScreen config={welcome} onSend={(text) => send(text)} />
+          <WelcomeScreen config={welcome} onSend={sendText} />
         </Pressable>
       ) : empty ? (
         // Tapping empty space closes the keyboard (the message list does this on its own).
@@ -472,7 +623,7 @@ function ChatViewInner({
                 <Pressable
                   key={s}
                   accessibilityRole="button"
-                  onPress={() => send(s)}
+                  onPress={() => sendText(s)}
                   style={({ pressed }) => [
                     styles.chip,
                     { borderColor: theme.colors.border, backgroundColor: theme.colors.inputBackground, opacity: pressed ? 0.7 : 1 },
@@ -497,6 +648,11 @@ function ChatViewInner({
             scrollEventThrottle={64}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            onScrollToIndexFailed={({ index, averageItemLength }) => {
+              // The target isn't rendered yet: scroll near it, then try again.
+              listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: true });
+              setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }), 250);
+            }}
             contentContainerStyle={[styles.listContent, custom.listContent]}
           />
           {showJump ? (
@@ -525,6 +681,23 @@ function ChatViewInner({
         onSend={handleSend}
         editing={editing}
         onCancelEdit={() => setEditing(null)}
+        replyingTo={replyingTo}
+        onCancelReply={() => setReplyingTo(null)}
+        topAccessory={
+          models?.length && showModelPicker ? (
+            <ModelPicker
+              models={models}
+              value={model}
+              disabled={isStreaming}
+              bottomInset={bottomInset}
+              onChange={(id) => {
+                feedback('select');
+                setModel?.(id);
+                onModelChange?.(id);
+              }}
+            />
+          ) : undefined
+        }
         onStop={stop}
         isStreaming={isStreaming}
         placeholder={placeholder}
@@ -549,9 +722,11 @@ function ChatViewInner({
 
   // Both platforms: lift the chat by exactly how much of it the keyboard covers.
   return (
-    <View ref={rootRef} style={[rootStyle, { paddingBottom: keyboard.overlap > 0 ? keyboard.overlap + keyboardVerticalOffset : 0 }]}>
-      {body}
-    </View>
+    <CodeBlockOptionsContext.Provider value={codeOptions}>
+      <View ref={rootRef} style={[rootStyle, { paddingBottom: keyboard.overlap > 0 ? keyboard.overlap + keyboardVerticalOffset : 0 }]}>
+        {body}
+      </View>
+    </CodeBlockOptionsContext.Provider>
   );
 }
 

@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { applyChunks, settleToolCalls } from './applyChunk';
-import type {
-  ChatChunk,
-  ChatMessage,
-  ChatStatus,
-  ChatAttachment,
-  ChatTransport,
-  MessagePart,
+import { applyChunks, settleReasoning, settleToolCalls } from './applyChunk';
+import { toSpeakableText } from './markdown/plainText';
+import {
+  getMessageText,
+  type ChatChunk,
+  type ChatMessage,
+  type ChatStatus,
+  type ChatAttachment,
+  type ChatTransport,
+  type MessagePart,
+  type MessageVersion,
+  type ReplyReference,
 } from './types';
 
 export type UseChatOptions = {
@@ -16,9 +20,20 @@ export type UseChatOptions = {
   onFinish?: (message: ChatMessage) => void;
   onError?: (error: Error) => void;
   generateId?: () => string;
+  /** The model to start with (for the model picker). Sent to the transport with every request. */
+  model?: string;
+  /**
+   * Regenerating a reply keeps the earlier answers, so the user can flip between
+   * them (‹ 2/3 ›). Default true. Set false to simply replace the reply.
+   */
+  keepReplyVersions?: boolean;
 };
 
-export type SendOptions = { attachments?: ChatAttachment[] };
+export type SendOptions = {
+  attachments?: ChatAttachment[];
+  /** Quote an earlier message in this one (quote reply). Pass the message or a ReplyReference. */
+  replyTo?: ChatMessage | ReplyReference;
+};
 
 export type UseChatResult = {
   messages: ChatMessage[];
@@ -39,7 +54,49 @@ export type UseChatResult = {
   editMessage: (id: string, text: string) => void;
   /** Remove one message. Deleting the reply that is streaming stops it first. */
   deleteMessage: (id: string) => void;
+  /** Get a new answer to the last question. The old one is kept as a version unless `keepReplyVersions` is false. */
+  regenerate: () => void;
+  /** Show another version of a reply (0-based index into all its versions). */
+  selectVersion: (id: string, index: number) => void;
+  /** The active model (see the `model` option). */
+  model: string | undefined;
+  /** Switch models. Applies from the next reply. */
+  setModel: (model: string) => void;
 };
+
+/** A short quote of a message for `send(text, { replyTo })`. */
+export function toReplyReference(message: ChatMessage, maxLength = 280): ReplyReference {
+  // Quote what the user saw, not markdown symbols; code blocks become "(code omitted)".
+  const raw = getMessageText(message);
+  const text = (message.role === 'assistant' ? toSpeakableText(raw) : raw).replace(/\s+/g, ' ').trim();
+  const fallback = message.parts.some((p) => p.type === 'image') ? '📷 Photo' : message.parts.find((p) => p.type === 'file') ? '📄 File' : '';
+  return {
+    id: message.id,
+    role: message.role,
+    text: text ? (text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text) : fallback,
+  };
+}
+
+const snapshot = (m: ChatMessage): MessageVersion => ({
+  parts: m.parts,
+  createdAt: m.createdAt,
+  status: m.status,
+  error: m.error,
+  rating: m.rating,
+  suggestions: m.suggestions,
+  sources: m.sources,
+  model: m.model,
+});
+
+/** All versions of a reply in order, the current one included. */
+export function allVersions(m: ChatMessage): MessageVersion[] {
+  const others = m.versions ?? [];
+  const at = Math.min(Math.max(m.versionIndex ?? others.length, 0), others.length);
+  return [...others.slice(0, at), snapshot(m), ...others.slice(at)];
+}
+
+const keepsAsVersion = (m: ChatMessage) =>
+  (m.status === 'done' || m.status === 'stopped') && m.parts.some((p) => (p.type === 'text' && p.text.trim()) || p.type === 'tool-call');
 
 const defaultId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -52,6 +109,8 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const [messages, setMessagesState] = useState<ChatMessage[]>(options.initialMessages ?? []);
   const [status, setStatus] = useState<ChatStatus>('idle');
   const [error, setError] = useState<Error | undefined>();
+  const [model, setModelState] = useState<string | undefined>(options.model);
+  const modelRef = useRef(model);
 
   // The ref is the source of truth so async stream code never sees stale state.
   const messagesRef = useRef(messages);
@@ -64,6 +123,15 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const pendingTargetRef = useRef<string | null>(null);
   const frameScheduledRef = useRef(false);
   const mountedRef = useRef(true);
+
+  const newAssistant = (id: string): ChatMessage => ({
+    id,
+    role: 'assistant',
+    parts: [],
+    createdAt: Date.now(),
+    status: 'streaming',
+    ...(modelRef.current ? { model: modelRef.current } : {}),
+  });
 
   const commit = useCallback((next: ChatMessage[]) => {
     messagesRef.current = next;
@@ -105,7 +173,11 @@ export function useChat(options: UseChatOptions): UseChatResult {
 
       let failure: Error | undefined;
       try {
-        const stream = optionsRef.current.transport({ messages: history, signal: controller.signal });
+        const stream = optionsRef.current.transport({
+          messages: history,
+          signal: controller.signal,
+          ...(modelRef.current ? { model: modelRef.current } : {}),
+        });
         for await (const chunk of stream) {
           if (controller.signal.aborted) break;
           if (chunk.type === 'error') {
@@ -126,7 +198,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
       if (pendingTargetRef.current === assistantId) flush();
       const stopped = controller.signal.aborted && !failure;
       updateMessage(assistantId, (m) => {
-        const settled = settleToolCalls(m, failure ? 'error' : 'done');
+        const settled = settleReasoning(settleToolCalls(m, failure ? 'error' : 'done'));
         return failure
           ? { ...settled, status: 'error', error: failure.message }
           : { ...settled, status: stopped ? 'stopped' : 'done' };
@@ -158,8 +230,17 @@ export function useChat(options: UseChatOptions): UseChatResult {
       );
       if (trimmed) parts.push({ type: 'text', text: trimmed });
 
-      const userMessage: ChatMessage = { id: makeId(), role: 'user', parts, createdAt: Date.now(), status: 'done' };
-      const assistant: ChatMessage = { id: makeId(), role: 'assistant', parts: [], createdAt: Date.now(), status: 'streaming' };
+      const quoted = sendOptions?.replyTo;
+      const replyTo = quoted ? ('parts' in quoted ? toReplyReference(quoted) : quoted) : undefined;
+      const userMessage: ChatMessage = {
+        id: makeId(),
+        role: 'user',
+        parts,
+        createdAt: Date.now(),
+        status: 'done',
+        ...(replyTo ? { replyTo } : {}),
+      };
+      const assistant = newAssistant(makeId());
       const history = [...messagesRef.current, userMessage];
       commit([...history, assistant]);
       void run(history, assistant.id);
@@ -169,6 +250,8 @@ export function useChat(options: UseChatOptions): UseChatResult {
 
   const stop = useCallback(() => controllerRef.current?.abort(), []);
 
+  // Retry and Regenerate: answer the last question again. A finished reply is
+  // kept as a version (‹ 1/2 ›); a failed one is simply replaced.
   const retry = useCallback(() => {
     if (controllerRef.current) return;
     const list = messagesRef.current;
@@ -182,10 +265,43 @@ export function useChat(options: UseChatOptions): UseChatResult {
     if (lastUser === -1) return;
     const makeId = optionsRef.current.generateId ?? defaultId;
     const history = list.slice(0, lastUser + 1);
-    const assistant: ChatMessage = { id: makeId(), role: 'assistant', parts: [], createdAt: Date.now(), status: 'streaming' };
+    const previous = list.slice(lastUser + 1).find((m) => m.role === 'assistant');
+    let assistant = newAssistant(makeId());
+    if (previous && optionsRef.current.keepReplyVersions !== false) {
+      const kept = (keepsAsVersion(previous) ? allVersions(previous) : previous.versions ?? []).filter(
+        (v) => v.status !== 'streaming',
+      );
+      if (kept.length) assistant = { ...assistant, id: previous.id, versions: kept, versionIndex: kept.length };
+    }
     commit([...history, assistant]);
     void run(history, assistant.id);
   }, [commit, run]);
+
+  const selectVersion = useCallback(
+    (id: string, index: number) => {
+      if (controllerRef.current) return;
+      updateMessage(id, (m) => {
+        if (!m.versions?.length) return m;
+        const all = allVersions(m);
+        const current = m.versionIndex ?? m.versions.length;
+        const target = all[index];
+        if (!target || index === current) return m;
+        const { rating: _r, suggestions: _s, sources: _src, error: _e, model: _m, ...base } = m;
+        return {
+          ...base,
+          ...target,
+          versions: all.filter((_, i) => i !== index),
+          versionIndex: index,
+        };
+      });
+    },
+    [updateMessage],
+  );
+
+  const setModel = useCallback((next: string) => {
+    modelRef.current = next;
+    setModelState(next);
+  }, []);
 
   const rateMessage = useCallback(
     (id: string, rating: 'up' | 'down' | null) => {
@@ -221,7 +337,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
         createdAt: Date.now(),
       };
       const history = [...list.slice(0, index), edited];
-      const assistant: ChatMessage = { id: makeId(), role: 'assistant', parts: [], createdAt: Date.now(), status: 'streaming' };
+      const assistant = newAssistant(makeId());
       commit([...history, assistant]);
       void run(history, assistant.id);
     },
@@ -269,5 +385,9 @@ export function useChat(options: UseChatOptions): UseChatResult {
     editMessage,
     deleteMessage,
     setMessages,
+    regenerate: retry,
+    selectVersion,
+    model,
+    setModel,
   };
 }

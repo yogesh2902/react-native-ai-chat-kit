@@ -7,7 +7,7 @@
  *   import * as ImageManipulator from 'expo-image-manipulator';
  *   const attachments = createExpoAttachmentPickers({ ImagePicker, DocumentPicker, ImageManipulator });
  */
-import type { AttachmentPickers, SpeechRecognizer, TextToSpeech } from '../components/customization';
+import type { AttachmentPickers, ChatFeedbackEvent, ChatFeedbackHandler, SpeechRecognizer, TextToSpeech } from '../components/customization';
 import type { ChatAttachment } from '../types';
 
 // ---- Minimal structural types for the Expo modules (no import needed) ----
@@ -299,5 +299,106 @@ export function createExpoSpeechRecognizer(
     abort() {
       module.abort();
     },
+  };
+}
+
+// ---- Haptics (expo-haptics) ----
+
+type HapticsModule = {
+  impactAsync: (style: any) => Promise<void>;
+  selectionAsync: () => Promise<void>;
+  notificationAsync: (type: any) => Promise<void>;
+  ImpactFeedbackStyle: { Light: any; Medium: any; Heavy?: any; Soft?: any; Rigid?: any };
+  NotificationFeedbackType: { Success: any; Warning: any; Error: any };
+};
+
+/** What each event does. `null` turns an event off. */
+export type HapticPattern = 'light' | 'medium' | 'heavy' | 'selection' | 'success' | 'warning' | 'error' | null;
+
+const DEFAULT_HAPTICS: Record<ChatFeedbackEvent, HapticPattern> = {
+  send: 'light',
+  replyDone: null,
+  error: 'error',
+  rate: 'selection',
+  longPress: 'medium',
+  select: 'selection',
+  swipeReply: 'light',
+};
+
+/**
+ * Light haptic taps on send, rate, long-press and more.
+ *
+ *   import * as Haptics from 'expo-haptics';
+ *   <ChatView haptics={createExpoHaptics(Haptics)} />
+ *
+ * Change or silence events with `{ replyDone: 'success', send: null }`.
+ */
+export function createExpoHaptics(Haptics: HapticsModule, patterns: Partial<Record<ChatFeedbackEvent, HapticPattern>> = {}): ChatFeedbackHandler {
+  const map = { ...DEFAULT_HAPTICS, ...patterns };
+  return (event) => {
+    const pattern = map[event];
+    if (!pattern) return;
+    let done: Promise<void> | undefined;
+    if (pattern === 'selection') done = Haptics.selectionAsync();
+    else if (pattern === 'success' || pattern === 'warning' || pattern === 'error') {
+      const type = { success: 'Success', warning: 'Warning', error: 'Error' }[pattern] as 'Success' | 'Warning' | 'Error';
+      done = Haptics.notificationAsync(Haptics.NotificationFeedbackType[type]);
+    } else {
+      const style = { light: 'Light', medium: 'Medium', heavy: 'Heavy' }[pattern] as 'Light' | 'Medium' | 'Heavy';
+      done = Haptics.impactAsync(Haptics.ImpactFeedbackStyle[style] ?? Haptics.ImpactFeedbackStyle.Medium);
+    }
+    // Haptics are best effort (simulators, web, devices without a motor).
+    done?.catch?.(() => {});
+  };
+}
+
+// ---- Sounds (expo-audio) ----
+
+type AudioPlayer = { play: () => void; seekTo: (seconds: number) => unknown; volume?: number };
+type AudioModule = { createAudioPlayer: (source: any) => AudioPlayer };
+
+/** A sound source: `require('./ding.mp3')` or `{ uri }`. */
+export type SoundSource = number | { uri: string };
+
+/** The kit's own short sounds (send pop, reply chime, error blip). */
+export function defaultChatSounds(): Partial<Record<ChatFeedbackEvent, SoundSource>> {
+  return {
+    send: require('../../assets/sounds/send.wav'),
+    replyDone: require('../../assets/sounds/reply.wav'),
+    error: require('../../assets/sounds/error.wav'),
+  };
+}
+
+/**
+ * Short sounds on send, when a reply finishes, and on errors. Off by default in
+ * ChatView; opt in by passing this. Respects the iPhone silent switch.
+ *
+ *   import * as Audio from 'expo-audio';
+ *   <ChatView sounds={createExpoSounds(Audio)} />
+ *
+ * Use your own files with `{ sounds: { replyDone: require('./ding.mp3') } }`
+ * (merged over the built-in ones; `null` turns an event off).
+ */
+export function createExpoSounds(
+  Audio: AudioModule,
+  options: { sounds?: Partial<Record<ChatFeedbackEvent, SoundSource | null>>; volume?: number } = {},
+): ChatFeedbackHandler {
+  const sources = { ...defaultChatSounds(), ...options.sounds };
+  const players = new Map<ChatFeedbackEvent, AudioPlayer>();
+  return (event) => {
+    const source = sources[event];
+    if (!source) return;
+    try {
+      let player = players.get(event);
+      if (!player) {
+        player = Audio.createAudioPlayer(source);
+        if (options.volume !== undefined) player.volume = options.volume;
+        players.set(event, player);
+      }
+      void Promise.resolve(player.seekTo(0)).catch(() => {});
+      player.play();
+    } catch {
+      // Sounds are best effort.
+    }
   };
 }

@@ -16,8 +16,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useChatLabels } from '../labels';
-import { fontStyle, useChatTheme } from '../theme';
-import type { ChatAttachment } from '../types';
+import { fontStyle, useChatTheme, withAlpha } from '../theme';
+import type { ChatAttachment, ReplyReference } from '../types';
 import type {
   AttachmentPickers,
   SendButtonRenderProps,
@@ -59,6 +59,11 @@ export type ComposerProps = {
   /** Put the composer in edit mode: fills the input with `text` and shows an "Editing" banner. Change `key` to start a new edit. */
   editing?: { key: string; text: string } | null;
   onCancelEdit?: () => void;
+  /** Quote reply: shows the quoted message above the input. */
+  replyingTo?: ReplyReference | null;
+  onCancelReply?: () => void;
+  /** Rendered above the input box, left-aligned (ChatView puts the model picker here). */
+  topAccessory?: React.ReactNode;
 };
 
 const formatBytes = (n?: number) =>
@@ -85,13 +90,17 @@ export function Composer({
   autoSendVoice = false,
   editing,
   onCancelEdit,
+  replyingTo,
+  onCancelReply,
+  topAccessory,
 }: ComposerProps) {
   const theme = useChatTheme();
   const labels = useChatLabels();
   const { colors } = theme;
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
-  const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  // Only `focus` is needed; typed loosely because TextInput's instance type differs across RN versions.
+  const inputRef = useRef<{ focus: () => void } | null>(null);
   const [pending, setPending] = useState<ChatAttachment[]>([]);
   const [picking, setPicking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -122,6 +131,14 @@ export function Composer({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editKey]);
+
+  // Starting a quote reply opens the keyboard.
+  const replyId = replyingTo?.id;
+  useEffect(() => {
+    if (!replyId) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 80);
+    return () => clearTimeout(timer);
+  }, [replyId]);
 
   const submit = (value = text) => {
     if (disabled || isStreaming || picking) return;
@@ -257,6 +274,22 @@ export function Composer({
         </View>
       ) : null}
 
+      {replyingTo && !editing ? (
+        <View style={[styles.replyBanner, { borderLeftColor: colors.accent, backgroundColor: withAlpha(colors.accent, 0.06), borderRadius: theme.radius * 0.45 }]}>
+          <View style={styles.replyText}>
+            <Text style={[{ color: colors.accent, fontSize: 12 }, fontStyle(theme, 'bold')]}>{'↩\uFE0E'} {labels.replyingTo(replyingTo.role)}</Text>
+            <Text numberOfLines={1} style={[{ color: colors.textMuted, fontSize: 13, marginTop: 1 }, regular]}>
+              {replyingTo.text}
+            </Text>
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel={labels.cancelReply} hitSlop={10} onPress={onCancelReply} style={styles.replyClose}>
+            <Text style={{ color: colors.textMuted, fontSize: 14, fontWeight: '700' }}>✕</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {topAccessory ? <View style={styles.topAccessory}>{topAccessory}</View> : null}
+
       {menuOpen ? (
         <View style={[styles.menu, { backgroundColor: colors.inputBackground, borderColor: colors.border, borderRadius: theme.radius * 0.7 }]}>
           {pickerOptions.map((o) => (
@@ -339,7 +372,7 @@ export function Composer({
           ) : null}
           {accessoryLeft}
           <TextInput
-            ref={inputRef}
+            ref={inputRef as never}
             value={text}
             onChangeText={setText}
             placeholder={listening ? labels.listening : placeholder ?? labels.placeholder}
@@ -446,6 +479,10 @@ function PulsingDot() {
 const styles = StyleSheet.create({
   wrap: { paddingHorizontal: 12, paddingTop: 8 },
   error: { fontSize: 13, marginBottom: 6, marginHorizontal: 4 },
+  replyBanner: { flexDirection: 'row', alignItems: 'center', borderLeftWidth: 3, paddingLeft: 10, paddingRight: 6, paddingVertical: 6, marginBottom: 8, marginHorizontal: 2 },
+  replyText: { flex: 1 },
+  replyClose: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  topAccessory: { flexDirection: 'row', marginBottom: 8, marginHorizontal: 2 },
   editBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, marginHorizontal: 4 },
   menu: { flexDirection: 'row', alignSelf: 'flex-start', borderWidth: StyleSheet.hairlineWidth, marginBottom: 8, paddingHorizontal: 4 },
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10 },

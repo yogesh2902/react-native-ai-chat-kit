@@ -53,7 +53,12 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - 🧠 **Frame-batched updates**: tokens are coalesced into one render per frame, not one per token.
 - 🛠️ **Tool-call cards**: show "Searching flights…" → ✓ Done while your agent works.
 - 🔌 **Provider-agnostic**: auto-detects OpenAI (Chat Completions & Responses), Anthropic Messages, Vercel AI SDK UI streams, plain text, or this kit's own format.
-- 🧑‍💻 **Code blocks** with syntax highlighting and a Copy button.
+- 🧠 **Reasoning** ("Thinking…" → "Thought for 12s", tap to read) and 🔗 **source chips** for answers that cite the web.
+- 🔁 **Reply versions**: Regenerate keeps the old answer, flip between them with ‹ 2/3 ›.
+- ↩︎ **Quote reply**: swipe a message to quote it in your next question.
+- 🧩 **Model picker**: let users switch models per chat (saved with each conversation).
+- 🧑‍💻 **Code blocks** with syntax highlighting (15+ languages, diffs), line numbers, light/dark themes and a Copy button.
+- 📳 **Haptics and sounds** on send, rate, swipe and reply done (opt-in).
 - 📊 Tables, lists, task lists, quotes, headings, links.
 - ⏹️ **Stop & Retry**, error states, "scroll to latest" button.
 - 💬 **Starter suggestions** for empty chats, and **follow-up chips** under replies.
@@ -310,6 +315,61 @@ History rows too: `<ChatHistory renderItem={({ session, active, onPress, onDelet
 - **Offline**: pass a `network` monitor (`createNetInfoMonitor(NetInfo)` from `@react-native-community/netinfo`, or `createWebNetworkMonitor()` on web) to show an offline banner. A reply that failed for lack of network is retried automatically when the connection returns (`autoRetry={false}` to turn that off).
 - **Right-to-left**: `direction="rtl"` mirrors the whole chat for Arabic, Urdu and Hebrew, including bubbles, the composer and tables. `'auto'` (the default) follows `I18nManager.isRTL`.
 
+## Reasoning, sources, versions, quote reply and more (0.3)
+
+Every feature below is optional. Turn each one on or off with a single prop.
+
+```tsx
+import * as Haptics from 'expo-haptics';
+import * as Audio from 'expo-audio';
+
+const MODELS = [
+  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet', description: 'Fast and smart', badge: 'Fast', icon: '⚡' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus', description: 'Thinks through hard problems', badge: 'Reasoning', icon: '🧠' },
+];
+
+const chat = useChatSessions({ transport, store, model: MODELS[0].id });
+
+<ChatView
+  {...chat}
+  reasoning="collapsed" // 'expanded' | false
+  showSources // default true
+  allowReply // swipe a message (or Reply in its menu) to quote it
+  models={MODELS} // model picker above the input
+  codeBlocks={{ lineNumbers: true, theme: 'auto' }} // 'dark' (default) | 'light' | 'auto'
+  haptics={createExpoHaptics(Haptics)}
+  sounds={createExpoSounds(Audio)}
+/>;
+```
+
+| Feature | Turn on / off | Notes |
+| --- | --- | --- |
+| **Reasoning** | `reasoning="collapsed"` (default), `"expanded"` or `false` | Shows when the model streams reasoning: "Thinking…" with a live preview, then "Thought for 12s". |
+| **Sources** | `showSources` (default `true`), `onSourcePress` | Numbered chips under replies that cite pages (web search, RAG). |
+| **Reply versions** | `useChat({ keepReplyVersions })` (default `true`), `replyVersions` | Regenerate (↻) keeps old answers; ‹ 2/3 › switches. Each version keeps its own rating. |
+| **Quote reply** | `allowReply` (default `false`) | Swipe right (left in RTL) or long-press → Reply. The quote is sent to the model too. Tap a quote to jump to the original. |
+| **Model picker** | `models`, `showModelPicker` (default `true`) | Picked per chat and saved with history. Put `<ModelPicker>` in your own header with `showModelPicker={false}`. |
+| **Code blocks** | `codeBlocks={{ highlight, lineNumbers, theme, header, renderCodeBlock }}` | JS/TS/JSX, Python, Swift, Kotlin, Java, Go, Rust, SQL, JSON, YAML, CSS, HTML, shell and diffs. `renderCodeBlock` lets you use any highlighter. |
+| **Haptics** | `haptics={createExpoHaptics(Haptics)}` | Off unless passed. Tune per event: `createExpoHaptics(Haptics, { replyDone: 'success', send: null })`. |
+| **Sounds** | `sounds={createExpoSounds(Audio)}` | Off unless passed. Built-in pop/chime/blip, or your own: `{ sounds: { replyDone: require('./ding.mp3') } }`. Respects the silent switch. |
+
+Both `haptics` and `sounds` are plain functions `(event) => void`, so any library works.
+
+**Getting reasoning and sources from a real model.** Turn them on where the model is called:
+
+```ts
+// In the app (prototyping) or on your server: same options.
+createProviderTransport({ provider: 'anthropic', apiKey, model: 'claude-opus-5-5', reasoning: true, webSearch: true });
+createChatHandler({ provider: 'gemini', apiKey, model, reasoning: true, webSearch: true, models: ['gemini-a', 'gemini-b'] });
+// or with environment variables: AI_REASONING=true AI_WEB_SEARCH=true AI_MODELS=model-a,model-b
+```
+
+- Claude: adaptive thinking with summarized display; web search with citations.
+- Gemini: thought summaries and Google Search grounding.
+- OpenAI-compatible APIs that stream `reasoning_content` (DeepSeek, OpenRouter, Groq…) work without setup, and so do Responses API reasoning summaries and URL citations, and AI SDK `reasoning-delta` / `source-url` parts.
+- Your own backend can send `{ "type": "reasoning-delta", "text": "…" }` and `{ "type": "source", "source": { "url": "…", "title": "…" } }` events.
+- The server only uses a model the app asks for if it is in `models`, so users can't switch to a model you didn't approve.
+
 ## Chat history (previous conversations)
 
 Swap `useChat` for `useChatSessions` and every conversation is saved automatically. Users can reopen any past chat and keep talking: new replies get that chat's full history as context.
@@ -356,10 +416,12 @@ function Assistant() {
 | `initialMessages` | `ChatMessage[]` | Restore a saved conversation. |
 | `onFinish` | `(message) => void` | Assistant finished (or was stopped). Save history here. |
 | `onError` | `(error) => void` | Stream failed. |
+| `model` | `string` | Starting model for the model picker. Sent to the transport as `model`. |
+| `keepReplyVersions` | `boolean` | Keep earlier answers when regenerating (default `true`). |
 
-Returns `{ messages, status, isStreaming, error, send, stop, retry, clear, setMessages, rateMessage, editMessage, deleteMessage }`.
+Returns `{ messages, status, isStreaming, error, send, stop, retry, regenerate, selectVersion, clear, setMessages, rateMessage, editMessage, deleteMessage, model, setModel }`.
 
-`send(text, { attachments })` also takes attachments from the pickers (see *Images, documents and voice*).
+`send(text, { attachments, replyTo })` also takes attachments from the pickers (see *Images, documents and voice*) and a message to quote.
 
 ### `<ChatView />`
 
@@ -386,6 +448,11 @@ Spread `useChat()` into it, plus:
 | `typingIndicator`, `streamingCursor` | Look of the waiting indicator and the streaming cursor |
 | `network`, `autoRetry` | Offline banner and retry on reconnect |
 | `attachments`, `voice`, `speech` | Photos/files, speech-to-text and read-aloud |
+| `reasoning`, `showSources`, `onSourcePress` | Reasoning block and source chips |
+| `replyVersions`, `allowReply` | ‹ 2/3 › version switcher; swipe-to-reply quotes |
+| `models`, `showModelPicker`, `onModelChange` | Model picker above the input |
+| `codeBlocks` | Code highlighting, line numbers, light/dark theme, custom renderer |
+| `haptics`, `sounds` | Feedback on chat events (`createExpoHaptics`, `createExpoSounds`) |
 | `renderMessage` | Render messages yourself |
 | `bottomInset`, `keyboardVerticalOffset` | Safe-area and header offsets |
 
@@ -393,7 +460,7 @@ Spread `useChat()` into it, plus:
 
 ```ts
 createStreamTransport({ url, headers?, body?, format?: 'sse' | 'text', parser? })
-createMockTransport({ reply?, tokenDelayMs?, initialDelayMs? })
+createMockTransport({ reply?, tokenDelayMs?, initialDelayMs?, reasoning? })
 ```
 
 A transport is just an async generator, so you can write your own (WebSocket, Firebase, on-device model…):
@@ -408,7 +475,7 @@ const myTransport: ChatTransport = async function* ({ messages, signal }) {
 
 ### Building blocks
 
-Use the pieces on their own: `StreamingMarkdown`, `MessageBubble`, `Composer`, `ToolCallCard`, `TypingIndicator`, plus `parseBlocks`, `parseInline` and `highlight`.
+Use the pieces on their own: `StreamingMarkdown`, `MessageBubble`, `Composer`, `ToolCallCard`, `TypingIndicator`, `ReasoningBlock`, `SourceList`, `ModelPicker`, plus `parseBlocks`, `parseInline` and `highlight`.
 
 ```tsx
 <StreamingMarkdown streaming={isStreaming}>{text}</StreamingMarkdown>
