@@ -44,6 +44,12 @@ export type ChatLabels = {
   stopped: string;
   errorFallback: string;
   suggestionsHint: string;
+  thinking: string;
+  messageOptions: string;
+  deleteMessage: string;
+  closeMenu: string;
+  offline: string;
+  reconnecting: string;
 
   // Tool cards
   toolRunning: string;
@@ -110,6 +116,12 @@ export const defaultLabels: ChatLabels = {
   stopped: 'Stopped',
   errorFallback: 'Something went wrong.',
   suggestionsHint: 'Suggested follow-ups',
+  thinking: 'Thinking…',
+  messageOptions: 'Message options',
+  deleteMessage: 'Delete message',
+  closeMenu: 'Close menu',
+  offline: "You're offline. Messages will send when you're back online.",
+  reconnecting: 'Back online. Retrying…',
 
   toolRunning: 'Working…',
   toolDone: 'Done',

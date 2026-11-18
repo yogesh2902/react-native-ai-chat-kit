@@ -37,6 +37,8 @@ export type UseChatResult = {
    * after that message is dropped (like editing in ChatGPT); its attachments are kept.
    */
   editMessage: (id: string, text: string) => void;
+  /** Remove one message. Deleting the reply that is streaming stops it first. */
+  deleteMessage: (id: string) => void;
 };
 
 const defaultId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -226,6 +228,17 @@ export function useChat(options: UseChatOptions): UseChatResult {
     [commit, run],
   );
 
+  const deleteMessage = useCallback(
+    (id: string) => {
+      const list = messagesRef.current;
+      const target = list.find((m) => m.id === id);
+      if (!target) return;
+      if (target.status === 'streaming') controllerRef.current?.abort();
+      commit(list.filter((m) => m.id !== id));
+    },
+    [commit],
+  );
+
   const clear = useCallback(() => {
     controllerRef.current?.abort();
     commit([]);
@@ -254,6 +267,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
     clear,
     rateMessage,
     editMessage,
+    deleteMessage,
     setMessages,
   };
 }

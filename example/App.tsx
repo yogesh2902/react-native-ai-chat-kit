@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -6,7 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Speech from 'expo-speech';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, BackHandler, Easing, Platform, Pressable, StyleSheet, Text, useColorScheme, useWindowDimensions, View } from 'react-native';
+import { Animated, BackHandler, Easing, Platform, Pressable, Share, StyleSheet, Text, useColorScheme, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChatHistory,
@@ -15,13 +16,19 @@ import {
   createExpoSpeech,
   createKeyValueStore,
   createMockTransport,
+  createNetInfoMonitor,
+  createWebNetworkMonitor,
   createWebSpeechRecognizer,
+  getMessageText,
   isWebSpeechRecognitionAvailable,
   createStreamTransport,
   darkTheme,
   lightTheme,
   useChatSessions,
   type ChatLabelsOverrides,
+  type ChatLayout,
+  type MessageAction,
+  type WelcomeConfig,
   type ChatStyles,
   type SpeechRecognizer,
   type ChatThemeOverrides,
@@ -102,6 +109,65 @@ const hindi: ChatLabelsOverrides = {
   previous30Days: 'पिछले 30 दिन',
 };
 
+const arabic: ChatLabelsOverrides = {
+  placeholder: 'اسأل أي شيء…',
+  emptyTitle: 'كيف يمكنني المساعدة؟',
+  copy: 'نسخ',
+  copied: 'تم النسخ ✓',
+  retry: 'إعادة',
+  listen: '🔊 استمع',
+  stopSpeaking: '■ إيقاف',
+  edit: 'تعديل',
+  editing: 'تعديل الرسالة',
+  cancelEdit: 'إلغاء',
+  thinking: 'يفكر…',
+  stopped: 'تم الإيقاف',
+  toolRunning: 'جارٍ العمل…',
+  toolDone: 'تم',
+  deleteMessage: 'حذف الرسالة',
+  cancel: 'إلغاء',
+  chats: 'المحادثات',
+  newChat: '＋ محادثة جديدة',
+  searchChats: 'ابحث في المحادثات',
+  noChats: 'لا توجد محادثات بعد',
+  clearAllChats: 'حذف كل المحادثات',
+  today: 'اليوم',
+  yesterday: 'أمس',
+  previous7Days: 'آخر 7 أيام',
+  previous30Days: 'آخر 30 يومًا',
+  offline: 'أنت غير متصل. سيتم الإرسال عند عودة الاتصال.',
+  reconnecting: 'عاد الاتصال. جارٍ إعادة المحاولة…',
+};
+
+type Language = 'en' | 'hi' | 'ar';
+const LANGUAGES: Language[] = ['en', 'hi', 'ar'];
+const labelsFor = { en: undefined, hi: hindi, ar: arabic } as const;
+const LANGUAGE_BUTTON = { en: 'अ', hi: 'ع', ar: 'A' } as const;
+
+// Empty screen with starter cards.
+const welcome: WelcomeConfig = {
+  logo: <Text style={{ fontSize: 40 }}>✦</Text>,
+  subtitle: 'Try a card below, or type anything. This demo runs without an API key.',
+  cards: [
+    { icon: '✈️', title: 'Plan a trip', description: 'Flights and ideas for Goa', prompt: 'Plan a trip to Goa' },
+    { icon: '💻', title: 'Setup code', description: 'Add the kit to an app', prompt: 'Show me the setup code' },
+    { icon: '🧩', title: 'What can you render?', description: 'Markdown, tables, code' },
+    { icon: '🖼', title: 'Send a photo', description: 'Tap ＋ below to attach one', prompt: 'How do I attach a photo?' },
+  ],
+};
+
+// Extra message actions: Share shows under replies; Delete is in the long-press menu.
+const messageActions: MessageAction[] = [
+  { key: 'share', icon: '↗', label: 'Share', inline: true, onPress: (m) => void Share.share({ message: getMessageText(m) }) },
+];
+
+// Offline banner + auto-retry when the connection comes back.
+const network = Platform.OS === 'web' ? createWebNetworkMonitor() : createNetInfoMonitor(NetInfo);
+
+// 🎨 cycles through the built-in layouts, then a fully custom brand look.
+type Look = ChatLayout | 'brand';
+const LOOKS: Look[] = ['minimal', 'bubbles', 'compact', 'brand'];
+
 // ---- Customization demo (🎨 button): a brand look built only from public props ----
 const BRAND = '#7C3AED';
 const brandTheme: ChatThemeOverrides = {
@@ -146,8 +212,9 @@ function Demo() {
   const [scheme, setScheme] = useState<'light' | 'dark'>(system === 'dark' ? 'dark' : 'light');
   const colors = (scheme === 'dark' ? darkTheme : lightTheme).colors;
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [branded, setBranded] = useState(false);
-  const [inHindi, setInHindi] = useState(false);
+  const [look, setLook] = useState<Look>('minimal');
+  const branded = look === 'brand';
+  const [language, setLanguage] = useState<Language>('en');
 
   const transport = useMemo(
     () => (CHAT_URL ? createStreamTransport({ url: CHAT_URL }) : createMockTransport()),
@@ -162,8 +229,17 @@ function Demo() {
       <ChatView
         {...chat}
         colorScheme={scheme}
-        labels={inHindi ? hindi : undefined}
-        placeholder={inHindi ? undefined : 'Ask anything…'}
+        labels={labelsFor[language]}
+        direction={language === 'ar' ? 'rtl' : 'ltr'}
+        placeholder={language === 'en' ? 'Ask anything…' : undefined}
+        layout={branded ? 'minimal' : look}
+        welcome={welcome}
+        showTimestamps
+        typingIndicator="text"
+        streamingCursor
+        messageActions={messageActions}
+        allowDelete
+        network={network}
         onFeedback={(message, rating) => console.log('[feedback]', rating, message.id)}
         suggestions={['What can you render?', 'Plan a trip to Goa', 'Show me the setup code']}
         onCopyCode={(code) => Clipboard.setStringAsync(code)}
@@ -196,8 +272,18 @@ function Demo() {
               {activeTitle}
             </Text>
             <View style={styles.headerActions}>
-              <HeaderButton label="अ" color={colors.text} accessibilityLabel="Toggle Hindi labels" onPress={() => setInHindi(!inHindi)} />
-              <HeaderButton label="🎨" color={colors.text} accessibilityLabel="Toggle brand style" onPress={() => setBranded(!branded)} />
+              <HeaderButton
+                label={LANGUAGE_BUTTON[language]}
+                color={colors.text}
+                accessibilityLabel="Switch language"
+                onPress={() => setLanguage(LANGUAGES[(LANGUAGES.indexOf(language) + 1) % LANGUAGES.length]!)}
+              />
+              <HeaderButton
+                label="🎨"
+                color={colors.text}
+                accessibilityLabel="Switch look"
+                onPress={() => setLook(LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length]!)}
+              />
               <HeaderButton
                 label={scheme === 'dark' ? '☀︎' : '☾'}
                 color={colors.text}
@@ -213,7 +299,7 @@ function Demo() {
       <SlideOver visible={historyOpen} onClose={() => setHistoryOpen(false)}>
         <ChatHistory
           colorScheme={scheme}
-          labels={inHindi ? hindi : undefined}
+          labels={labelsFor[language]}
           sessions={chat.sessions}
           activeSessionId={chat.activeSessionId}
           isLoading={chat.isLoadingSessions}

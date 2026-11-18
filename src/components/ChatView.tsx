@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  I18nManager,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -17,12 +18,21 @@ import {
 import { ChatLabelsContext, mergeLabels, useChatLabels, type ChatLabelsOverrides } from '../labels';
 import { fontStyle, useChatTheme } from '../theme';
 import { toSpeakableText } from '../markdown/plainText';
+import { isNetworkError } from '../adapters/network';
 import { getMessageText, type ChatAttachment, type ChatMessage } from '../types';
+import { buildListItems, formatMessageTime, type ChatListItem } from './chatListItems';
+import { MessageMenu, type MessageMenuItem } from './MessageMenu';
+import { WelcomeScreen } from './WelcomeScreen';
 import { ChatThemeProvider, type ThemeProps } from './ChatThemeProvider';
 import { Composer, type ComposerProps } from './Composer';
 import type {
   AttachmentPickers,
+  ChatLayout,
   ChatStyles,
+  MessageAction,
+  NetworkMonitor,
+  TypingIndicatorStyle,
+  WelcomeConfig,
   MessageRenderers,
   SendButtonRenderProps,
   SpeechRecognizer,
@@ -87,6 +97,30 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
    */
   followUps?: false | ((message: ChatMessage) => string[] | undefined);
 
+  /** 'minimal' (default), 'bubbles' or 'compact'. */
+  layout?: ChatLayout;
+  /** Look of the indicator shown before the first token: 'dots' (default), 'pulse' or 'text'. */
+  typingIndicator?: TypingIndicatorStyle;
+  /** Show a cursor at the end of a streaming reply. `true` uses '▍', or pass your own character. */
+  streamingCursor?: boolean | string;
+  /** Extra actions for the long-press menu (and inline buttons with `inline: true`). */
+  messageActions?: MessageAction[] | ((message: ChatMessage) => MessageAction[]);
+  /** `deleteMessage` from useChat (spread in). Shown in the long-press menu when `allowDelete` is true. */
+  deleteMessage?: (id: string) => void;
+  allowDelete?: boolean;
+  /** A richer empty screen: logo, greeting and starter cards. */
+  welcome?: WelcomeConfig;
+  /** Time under each message. Also turns on date separators unless `dateSeparators` is set. */
+  showTimestamps?: boolean;
+  dateSeparators?: boolean;
+  formatTime?: (date: Date) => string;
+  /** Connectivity source for the offline banner. See createNetInfoMonitor / createWebNetworkMonitor. */
+  network?: NetworkMonitor;
+  /** Retry a reply that failed for lack of network once the device is back online. Default true. */
+  autoRetry?: boolean;
+  /** 'auto' (default) follows the app's RTL setting; 'rtl' mirrors the layout for Arabic, Urdu, Hebrew… */
+  direction?: 'ltr' | 'rtl' | 'auto';
+
   /** Fully replace how a message renders. */
   renderMessage?: (message: ChatMessage, index: number) => React.ReactElement | null;
 
@@ -99,7 +133,7 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
 export function ChatView({ colorScheme, theme, labels, ...props }: ChatViewProps) {
   const merged = useMemo(() => mergeLabels(labels), [labels]);
   return (
-    <ChatThemeProvider colorScheme={colorScheme} theme={theme}>
+    <ChatThemeProvider colorScheme={colorScheme} theme={theme} layout={props.layout}>
       <ChatLabelsContext.Provider value={merged}>
         <ChatViewInner {...props} />
       </ChatLabelsContext.Provider>
@@ -141,15 +175,31 @@ function ChatViewInner({
   editMessage,
   allowEdit = true,
   followUps,
+  layout = 'minimal',
+  typingIndicator,
+  streamingCursor,
+  messageActions,
+  deleteMessage,
+  allowDelete = false,
+  welcome,
+  showTimestamps = false,
+  dateSeparators,
+  formatTime = formatMessageTime,
+  network,
+  autoRetry = true,
+  direction = 'auto',
 }: Omit<ChatViewProps, keyof ThemeProps | 'labels'>) {
   const theme = useChatTheme();
   const labels = useChatLabels();
-  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const listRef = useRef<FlatList<ChatListItem>>(null);
   const [showJump, setShowJump] = useState(false);
 
   // Inverted list: newest message sits at offset 0, so streaming text grows
   // upward from the composer and the view stays pinned to the bottom for free.
-  const data = useMemo(() => messages.filter((m) => m.role !== 'system').reverse(), [messages]);
+  const withDates = dateSeparators ?? showTimestamps;
+  const data = useMemo(() => buildListItems(messages, { dateSeparators: withDates, labels }), [messages, withDates, labels]);
+  const indexById = useMemo(() => new Map(messages.map((m, i) => [m.id, i])), [messages]);
+  const cursor = streamingCursor === true ? '▍' : streamingCursor || undefined;
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'assistant') return messages[i]!.id;
     return undefined;
@@ -222,12 +272,83 @@ function ChatViewInner({
   );
   useEffect(() => () => speech?.stop(), [speech]);
 
+  // Custom actions and the long-press menu.
+  const actionsFor = useCallback(
+    (message: ChatMessage): MessageAction[] =>
+      !messageActions ? [] : typeof messageActions === 'function' ? messageActions(message) : messageActions,
+    [messageActions],
+  );
+  const menuEnabled = !!messageActions || (allowDelete && !!deleteMessage);
+  const [menuMessage, setMenuMessage] = useState<ChatMessage | null>(null);
+  const openMenu = useCallback((message: ChatMessage) => setMenuMessage(message), []);
+  const menuItems: MessageMenuItem[] = useMemo(() => {
+    if (!menuMessage) return [];
+    const text = getMessageText(menuMessage);
+    const items: MessageMenuItem[] = [];
+    if (onCopyMessage && text) items.push({ key: 'copy', icon: '⧉', label: labels.copy, onPress: () => onCopyMessage(text) });
+    if (menuMessage.role === 'user' && allowEdit && editMessage && menuMessage.id === lastUserId && !isStreaming) {
+      items.push({ key: 'edit', icon: '✎', label: labels.edit, onPress: () => startEdit(menuMessage) });
+    }
+    for (const action of actionsFor(menuMessage)) {
+      items.push({ key: `custom:${action.key}`, icon: action.icon, label: action.label, destructive: action.destructive, onPress: () => action.onPress(menuMessage) });
+    }
+    if (allowDelete && deleteMessage) {
+      items.push({ key: 'delete', icon: '🗑', label: labels.deleteMessage, destructive: true, onPress: () => deleteMessage(menuMessage.id) });
+    }
+    return items;
+  }, [menuMessage, onCopyMessage, labels, allowEdit, editMessage, lastUserId, isStreaming, startEdit, actionsFor, allowDelete, deleteMessage]);
+
+  // Offline banner, and retrying a reply that failed for lack of network once we're back.
+  const [online, setOnline] = useState(() => network?.isOnline?.() ?? true);
+  const [reconnecting, setReconnecting] = useState(false);
+  const latest = useRef({ messages, retry, autoRetry });
+  latest.current = { messages, retry, autoRetry };
+  useEffect(() => {
+    if (!network) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let wasOnline = network.isOnline?.() ?? true;
+    setOnline(wasOnline);
+    const unsubscribe = network.subscribe((isOnline) => {
+      setOnline(isOnline);
+      if (isOnline && !wasOnline) {
+        const last = latest.current.messages[latest.current.messages.length - 1];
+        if (latest.current.autoRetry && last?.role === 'assistant' && last.status === 'error' && isNetworkError(last.error)) {
+          setReconnecting(true);
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => setReconnecting(false), 2500);
+          latest.current.retry?.();
+        }
+      }
+      wasOnline = isOnline;
+    });
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
+  }, [network]);
+
   const renderItem = useCallback(
-    ({ item, index }: ListRenderItemInfo<ChatMessage>) =>
-      renderMessage ? (
-        renderMessage(item, data.length - 1 - index)
+    ({ item: listItem }: ListRenderItemInfo<ChatListItem>) => {
+      if (listItem.kind === 'date') {
+        return (
+          <View style={styles.dateRow} accessibilityRole="header">
+            <Text style={[styles.dateText, { color: theme.colors.textMuted, backgroundColor: theme.colors.inputBackground }, fontStyle(theme, 'bold')]}>
+              {listItem.label}
+            </Text>
+          </View>
+        );
+      }
+      const item = listItem.message;
+      return renderMessage ? (
+        renderMessage(item, indexById.get(item.id) ?? 0)
       ) : (
         <MessageBubble
+          layout={layout}
+          typingIndicator={typingIndicator}
+          streamingCursor={cursor}
+          inlineActions={item.role === 'assistant' ? actionsFor(item).filter((a) => a.inline) : undefined}
+          onLongPress={menuEnabled ? openMenu : undefined}
+          timestamp={showTimestamps && item.status !== 'streaming' ? formatTime(new Date(item.createdAt)) : undefined}
           message={item.id === lastAssistantId ? withFollowUps(item) : item}
           isLast={item.id === lastAssistantId}
           onFeedback={onFeedback ? handleFeedback : undefined}
@@ -244,10 +365,20 @@ function ChatViewInner({
           onSpeak={speech ? onSpeak : undefined}
           speaking={item.id === speakingId}
         />
-      ),
+      );
+    },
     [
+      theme,
+      indexById,
+      layout,
+      typingIndicator,
+      cursor,
+      actionsFor,
+      menuEnabled,
+      openMenu,
+      showTimestamps,
+      formatTime,
       renderMessage,
-      data.length,
       lastAssistantId,
       retry,
       onCopyMessage,
@@ -281,12 +412,17 @@ function ChatViewInner({
   const empty = messages.length === 0;
   const rootRef = useRef<React.ComponentRef<typeof View>>(null);
   const keyboard = useKeyboardInset(rootRef);
-  const rootStyle = [styles.root, { backgroundColor: theme.colors.background }, style];
+  const dir = direction === 'auto' ? (I18nManager.isRTL ? 'rtl' : 'ltr') : direction;
+  const rootStyle = [styles.root, { backgroundColor: theme.colors.background, direction: dir } as const, style];
 
   const body = (
     <>
       {header}
-      {empty ? (
+      {empty && welcome && !emptyState ? (
+        <Pressable style={styles.welcome} onPress={Keyboard.dismiss} accessible={false}>
+          <WelcomeScreen config={welcome} onSend={(text) => send(text)} />
+        </Pressable>
+      ) : empty ? (
         // Tapping empty space closes the keyboard (the message list does this on its own).
         <Pressable style={styles.empty} onPress={Keyboard.dismiss} accessible={false}>
           {emptyState ?? (
@@ -319,7 +455,7 @@ function ChatViewInner({
             ref={listRef}
             data={data}
             inverted
-            keyExtractor={(m) => m.id}
+            keyExtractor={(item) => item.key}
             renderItem={renderItem}
             onScroll={onScroll}
             scrollEventThrottle={64}
@@ -339,6 +475,16 @@ function ChatViewInner({
           ) : null}
         </View>
       )}
+      {network && (!online || reconnecting) ? (
+        <View
+          accessibilityLiveRegion="polite"
+          style={[styles.banner, { backgroundColor: online ? theme.colors.success : theme.colors.text }]}
+        >
+          <Text style={[styles.bannerText, { color: theme.colors.background }, fontStyle(theme, 'bold')]}>
+            {online ? labels.reconnecting : labels.offline}
+          </Text>
+        </View>
+      ) : null}
       <Composer
         onSend={handleSend}
         editing={editing}
@@ -359,6 +505,9 @@ function ChatViewInner({
         autoSendVoice={autoSendVoice}
         {...composerProps}
       />
+      {menuEnabled ? (
+        <MessageMenu message={menuMessage} items={menuItems} onClose={() => setMenuMessage(null)} bottomInset={bottomInset} />
+      ) : null}
     </>
   );
 
@@ -379,6 +528,11 @@ const styles = StyleSheet.create({
   listWrap: { flex: 1 },
   listContent: { paddingVertical: 12 },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
+  welcome: { flex: 1 },
+  dateRow: { alignItems: 'center', paddingVertical: 8 },
+  dateText: { fontSize: 12, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999, overflow: 'hidden' },
+  banner: { marginHorizontal: 12, marginBottom: 4, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  bannerText: { fontSize: 13, textAlign: 'center' },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 20 },
   chip: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   jump: {
