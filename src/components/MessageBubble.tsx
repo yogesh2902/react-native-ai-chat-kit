@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useChatLabels } from '../labels';
 import { StreamingMarkdown } from '../markdown/StreamingMarkdown';
 import { fontStyle, useChatTheme } from '../theme';
 import { getMessageText, type ChatMessage } from '../types';
@@ -20,6 +21,12 @@ export type MessageBubbleProps = MessageRenderers & {
   onSpeak?: (message: ChatMessage) => void;
   /** This message is being read aloud right now (button shows Stop). */
   speaking?: boolean;
+  /** Shows 👍/👎 under assistant replies. Called with the new rating (`null` when un-selected). */
+  onFeedback?: (message: ChatMessage, rating: 'up' | 'down' | null) => void;
+  /** Shows an Edit action under this (user) message. */
+  onEdit?: (message: ChatMessage) => void;
+  /** Tapping a follow-up suggestion chip. Chips show only on the latest reply. */
+  onSuggestionPress?: (text: string) => void;
 };
 
 const formatBytes = (n?: number) =>
@@ -38,8 +45,12 @@ function MessageBubbleImpl({
   styles: custom = {},
   onSpeak,
   speaking,
+  onFeedback,
+  onEdit,
+  onSuggestionPress,
 }: MessageBubbleProps) {
   const theme = useChatTheme();
+  const labels = useChatLabels();
   const isUser = message.role === 'user';
   const streaming = message.status === 'streaming';
   const color = isUser ? theme.colors.userText : theme.colors.assistantText;
@@ -132,25 +143,67 @@ function MessageBubbleImpl({
           {message.status === 'error' ? (
             <View style={styles.errorRow}>
               <Text style={[{ color: theme.colors.danger, fontSize: theme.fontSize * 0.85, flexShrink: 1 }, fontStyle(theme)]}>
-                {message.error ?? 'Something went wrong.'}
+                {message.error ?? labels.errorFallback}
               </Text>
             </View>
           ) : null}
 
           {message.status === 'stopped' ? (
-            <Text style={[{ color: theme.colors.textMuted, fontSize: theme.fontSize * 0.8, marginTop: 6 }, fontStyle(theme)]}>Stopped</Text>
+            <Text style={[{ color: theme.colors.textMuted, fontSize: theme.fontSize * 0.8, marginTop: 6 }, fontStyle(theme)]}>{labels.stopped}</Text>
           ) : null}
         </View>
 
-        {!isUser && !streaming && (onCopyMessage || onSpeak || (isLast && onRetry)) ? (
+        {isUser && onEdit && message.status !== 'streaming' ? (
           <View style={styles.actions}>
+            <ActionButton label={`✎ ${labels.edit}`} onPress={() => onEdit(message)} />
+          </View>
+        ) : null}
+
+        {!isUser && !streaming && (onCopyMessage || onSpeak || onFeedback || (isLast && onRetry)) ? (
+          <View style={styles.actions}>
+            {onFeedback && message.status !== 'error' ? (
+              <>
+                <ActionButton
+                  label="👍"
+                  accessibilityLabel={labels.helpful}
+                  selected={message.rating === 'up'}
+                  onPress={() => onFeedback(message, message.rating === 'up' ? null : 'up')}
+                />
+                <ActionButton
+                  label="👎"
+                  accessibilityLabel={labels.notHelpful}
+                  selected={message.rating === 'down'}
+                  onPress={() => onFeedback(message, message.rating === 'down' ? null : 'down')}
+                />
+              </>
+            ) : null}
             {onSpeak && getMessageText(message) ? (
-              <ActionButton label={speaking ? '■ Stop' : '🔊 Listen'} onPress={() => onSpeak(message)} />
+              <ActionButton label={speaking ? labels.stopSpeaking : labels.listen} onPress={() => onSpeak(message)} />
             ) : null}
             {onCopyMessage && getMessageText(message) ? (
-              <ActionButton label="Copy" onPress={() => onCopyMessage(getMessageText(message))} />
+              <ActionButton label={labels.copy} onPress={() => onCopyMessage(getMessageText(message))} />
             ) : null}
-            {isLast && onRetry ? <ActionButton label="Retry" onPress={onRetry} /> : null}
+            {isLast && onRetry ? <ActionButton label={labels.retry} onPress={onRetry} /> : null}
+          </View>
+        ) : null}
+
+        {!isUser && isLast && !streaming && onSuggestionPress && message.suggestions?.length ? (
+          <View style={styles.suggestions} accessibilityLabel={labels.suggestionsHint}>
+            {message.suggestions.map((suggestion) => (
+              <Pressable
+                key={suggestion}
+                accessibilityRole="button"
+                onPress={() => onSuggestionPress(suggestion)}
+                style={({ pressed }) => [
+                  styles.suggestion,
+                  { borderColor: theme.colors.accent, borderRadius: theme.radius, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Text style={[{ color: theme.colors.accent, fontSize: theme.fontSize * 0.85 }, fontStyle(theme, 'bold')]}>
+                  {suggestion}
+                </Text>
+              </Pressable>
+            ))}
           </View>
         ) : null}
       </View>
@@ -158,17 +211,35 @@ function MessageBubbleImpl({
   );
 }
 
-function ActionButton({ label, onPress }: { label: string; onPress: () => void }) {
+function ActionButton({
+  label,
+  onPress,
+  accessibilityLabel,
+  selected,
+}: {
+  label: string;
+  onPress: () => void;
+  accessibilityLabel?: string;
+  selected?: boolean;
+}) {
   const theme = useChatTheme();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={selected === undefined ? undefined : { selected }}
       hitSlop={8}
       onPress={onPress}
-      style={({ pressed }) => [styles.action, { borderColor: theme.colors.border, opacity: pressed ? 0.6 : 1 }]}
+      style={({ pressed }) => [
+        styles.action,
+        {
+          borderColor: selected ? theme.colors.accent : theme.colors.border,
+          backgroundColor: selected ? theme.colors.inputBackground : 'transparent',
+          opacity: pressed ? 0.6 : 1,
+        },
+      ]}
     >
-      <Text style={[{ color: theme.colors.textMuted, fontSize: 12 }, fontStyle(theme, 'bold')]}>{label}</Text>
+      <Text style={[{ color: selected ? theme.colors.text : theme.colors.textMuted, fontSize: 12 }, fontStyle(theme, 'bold')]}>{label}</Text>
     </Pressable>
   );
 }
@@ -194,4 +265,6 @@ const styles = StyleSheet.create({
   errorRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
   actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   action: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  suggestion: { borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
 });

@@ -56,7 +56,9 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - 🧑‍💻 **Code blocks** with syntax highlighting and a Copy button.
 - 📊 Tables, lists, task lists, quotes, headings, links.
 - ⏹️ **Stop & Retry**, error states, "scroll to latest" button.
-- 💬 **Starter suggestions** for empty chats.
+- 💬 **Starter suggestions** for empty chats, and **follow-up chips** under replies.
+- 👍 **Feedback buttons** with an `onFeedback` callback, and ✎ **edit & resend** for the last message.
+- 🌍 **Translatable**: every label and screen-reader text can be overridden.
 - 🎨 **Fully customizable**: theme, custom fonts, per-piece styles, avatars, custom tool cards, send/stop buttons and history rows.
 - 🌗 **Light/dark themes**, fully overridable.
 - ⌨️ Enter-to-send on web/desktop, keyboard-aware on iOS/Android.
@@ -243,6 +245,21 @@ History rows too: `<ChatHistory renderItem={({ session, active, onPress, onDelet
 
 **4. Full control**: `renderMessage` replaces a whole message, or build your own screen from `useChat`, `StreamingMarkdown`, `MessageBubble`, `Composer`, `ToolCallCard` and `TypingIndicator`. Use `useChatTheme()` and `fontStyle(theme)` to match the kit's look in your own components.
 
+## Feedback, editing, follow-ups and translations
+
+```tsx
+<ChatView
+  {...chat}
+  onFeedback={(message, rating) => analytics.track('ai_feedback', { id: message.id, rating })}
+  labels={{ placeholder: 'कुछ भी पूछें…', emptyTitle: 'मैं कैसे मदद करूँ?', copy: 'कॉपी', retry: 'फिर से' }}
+/>
+```
+
+- **👍 / 👎 feedback**: pass `onFeedback` and every reply gets thumbs up/down. With `useChat` or `useChatSessions` spread in, the rating is also saved on the message (`message.rating`), so it survives in chat history. Tapping again removes it (`rating: null`).
+- **✎ Edit & resend**: the user's latest message gets an Edit action. The text goes back into the input with an "Editing message · Cancel" banner; sending replaces that message and everything after it, then gets a fresh reply (attachments are kept). Use `chat.editMessage(id, text)` directly, or `allowEdit={false}` to hide it.
+- **Follow-up chips**: tappable suggestions under the latest reply; tapping one sends it. They come from the reply stream (a `{ "type": "suggestions", "suggestions": [...] }` event from your backend, or `{ suggestions: [...] }` in a mock script), or from the app: `followUps={(message) => ['Tell me more', 'Summarize']}`. `followUps={false}` hides them.
+- **Translations**: `labels` overrides any of the ~60 strings (buttons, placeholders, history date groups, month names, screen-reader labels). `<ChatHistory labels={…}>` takes the same object, and `defaultLabels` shows every key.
+
 ## Chat history (previous conversations)
 
 Swap `useChat` for `useChatSessions` and every conversation is saved automatically. Users can reopen any past chat and keep talking: new replies get that chat's full history as context.
@@ -290,9 +307,9 @@ function Assistant() {
 | `onFinish` | `(message) => void` | Assistant finished (or was stopped). Save history here. |
 | `onError` | `(error) => void` | Stream failed. |
 
-Returns `{ messages, status, isStreaming, error, send, stop, retry, clear, setMessages }`.
+Returns `{ messages, status, isStreaming, error, send, stop, retry, clear, setMessages, rateMessage, editMessage }`.
 
-`send(text, { images })` also accepts image attachments: `[{ uri, width, height }]`.
+`send(text, { attachments })` also takes attachments from the pickers (see *Images, documents and voice*).
 
 ### `<ChatView />`
 
@@ -306,6 +323,11 @@ Spread `useChat()` into it, plus:
 | `placeholder`, `header`, `emptyState` | Customize the chrome |
 | `onCopyCode`, `onCopyMessage` | Enable Copy buttons, e.g. `Clipboard.setStringAsync` from `expo-clipboard` |
 | `onLinkPress` | Defaults to `Linking.openURL` |
+| `onFeedback` | Show 👍/👎 under replies and get `(message, rating)` |
+| `followUps` | Create follow-up chips in the app, or `false` to hide them |
+| `allowEdit` | Show Edit on the latest user message (default `true` when `editMessage` is spread in) |
+| `labels` | Translate or reword any UI text |
+| `attachments`, `voice`, `speech` | Photos/files, speech-to-text and read-aloud |
 | `renderMessage` | Render messages yourself |
 | `bottomInset`, `keyboardVerticalOffset` | Safe-area and header offsets |
 

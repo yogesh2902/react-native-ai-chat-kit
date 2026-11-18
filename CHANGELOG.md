@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- **Feedback**: 👍/👎 under replies with an `onFeedback` callback; ratings are saved on the message (`message.rating`) and in chat history. New `rateMessage(id, rating)` on `useChat`.
+- **Edit & resend**: the latest user message can be edited; the rest of the conversation after it is replaced by a fresh reply. New `editMessage(id, text)` on `useChat`, `allowEdit` prop.
+- **Follow-up chips** under the latest reply, from a new `suggestions` stream event or an app-side `followUps` function.
+- **Translations**: a `labels` prop on `ChatView` and `ChatHistory` overrides every UI and screen-reader string, including history date groups and month names. `defaultLabels` lists them all.
+- Mock transport demo replies now include follow-up suggestions.
+- README: screenshots gallery, fixed the `send` attachments docs.
+
 ## 0.1.1
 
 - Fix: the composer's mic button now shows a recognizable microphone icon (it previously looked like a "0").

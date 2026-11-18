@@ -67,6 +67,10 @@ export type ChatMessage = {
   createdAt: number;
   status?: MessageStatus;
   error?: string;
+  /** The user's thumbs up/down on an assistant reply. */
+  rating?: 'up' | 'down';
+  /** Follow-up prompts offered under an assistant reply. */
+  suggestions?: string[];
 };
 
 /**
@@ -77,6 +81,8 @@ export type ChatChunk =
   | { type: 'text-delta'; text: string }
   | { type: 'tool-call-start'; id: string; name: string; label?: string; args?: unknown }
   | { type: 'tool-call-end'; id: string; result?: unknown; error?: string }
+  /** Follow-up prompts to show as chips under the reply. */
+  | { type: 'suggestions'; suggestions: string[] }
   | { type: 'error'; message: string };
 
 export type TransportRequest = {

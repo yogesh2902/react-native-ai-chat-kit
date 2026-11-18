@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { useChatLabels } from '../labels';
 import { fontStyle, useChatTheme } from '../theme';
 import type { ToolCallPart } from '../types';
 
@@ -16,7 +17,8 @@ export function humanizeToolName(name: string): string {
 export function ToolCallCard({ part }: { part: ToolCallPart }) {
   const theme = useChatTheme();
   const title = part.label ?? humanizeToolName(part.name);
-  const statusText = part.state === 'running' ? 'Working…' : part.state === 'done' ? 'Done' : part.error ?? 'Failed';
+  const labels = useChatLabels();
+  const statusText = part.state === 'running' ? labels.toolRunning : part.state === 'done' ? labels.toolDone : part.error ?? labels.toolFailed;
 
   return (
     <View

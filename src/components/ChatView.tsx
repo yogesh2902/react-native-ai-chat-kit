@@ -14,6 +14,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { ChatLabelsContext, mergeLabels, useChatLabels, type ChatLabelsOverrides } from '../labels';
 import { fontStyle, useChatTheme } from '../theme';
 import { toSpeakableText } from '../markdown/plainText';
 import { getMessageText, type ChatAttachment, type ChatMessage } from '../types';
@@ -67,6 +68,25 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   /** Replace the stop button shown while a reply streams. */
   renderStopButton?: (props: StopButtonRenderProps) => React.ReactNode;
 
+  /** Translate or reword any text in the UI, e.g. `{ placeholder: 'संदेश लिखें', copy: 'कॉपी' }`. */
+  labels?: ChatLabelsOverrides;
+  /**
+   * Show 👍/👎 under replies and get called when the user rates one (`null` = rating removed).
+   * With `useChat`/`useChatSessions` spread in, the rating is also saved on the message.
+   */
+  onFeedback?: (message: ChatMessage, rating: 'up' | 'down' | null) => void;
+  /** `rateMessage` from useChat (spread in automatically). */
+  rateMessage?: (id: string, rating: 'up' | 'down' | null) => void;
+  /** `editMessage` from useChat. When present, the latest user message gets an Edit action. Set `allowEdit={false}` to hide it. */
+  editMessage?: (id: string, text: string) => void;
+  allowEdit?: boolean;
+  /**
+   * Follow-up chips under the latest reply. By default they come from the
+   * reply itself (a `suggestions` stream event). Pass a function to create them
+   * in the app instead, or `false` to hide them.
+   */
+  followUps?: false | ((message: ChatMessage) => string[] | undefined);
+
   /** Fully replace how a message renders. */
   renderMessage?: (message: ChatMessage, index: number) => React.ReactElement | null;
 
@@ -76,10 +96,13 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   style?: StyleProp<ViewStyle>;
 };
 
-export function ChatView({ colorScheme, theme, ...props }: ChatViewProps) {
+export function ChatView({ colorScheme, theme, labels, ...props }: ChatViewProps) {
+  const merged = useMemo(() => mergeLabels(labels), [labels]);
   return (
     <ChatThemeProvider colorScheme={colorScheme} theme={theme}>
-      <ChatViewInner {...props} />
+      <ChatLabelsContext.Provider value={merged}>
+        <ChatViewInner {...props} />
+      </ChatLabelsContext.Provider>
     </ChatThemeProvider>
   );
 }
@@ -113,8 +136,14 @@ function ChatViewInner({
   voice,
   autoSendVoice,
   speech,
-}: Omit<ChatViewProps, keyof ThemeProps>) {
+  onFeedback,
+  rateMessage,
+  editMessage,
+  allowEdit = true,
+  followUps,
+}: Omit<ChatViewProps, keyof ThemeProps | 'labels'>) {
   const theme = useChatTheme();
+  const labels = useChatLabels();
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const [showJump, setShowJump] = useState(false);
 
@@ -125,6 +154,54 @@ function ChatViewInner({
     for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'assistant') return messages[i]!.id;
     return undefined;
   }, [messages]);
+
+  const lastUserId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === 'user') return messages[i]!.id;
+    return undefined;
+  }, [messages]);
+
+  // Feedback: save the rating on the message (if the hook is spread in) and tell the app.
+  const handleFeedback = useCallback(
+    (message: ChatMessage, rating: 'up' | 'down' | null) => {
+      rateMessage?.(message.id, rating);
+      onFeedback?.(message, rating);
+    },
+    [rateMessage, onFeedback],
+  );
+
+  // Edit & resend: the composer switches to edit mode for the chosen message.
+  const [editing, setEditing] = useState<{ id: string; key: string; text: string } | null>(null);
+  const startEdit = useCallback((message: ChatMessage) => {
+    setEditing({ id: message.id, key: `${message.id}:${Date.now()}`, text: getMessageText(message) });
+  }, []);
+  useEffect(() => {
+    // The message being edited disappeared (new chat, history switch): leave edit mode.
+    if (editing && !messages.some((m) => m.id === editing.id)) setEditing(null);
+  }, [messages, editing]);
+  const handleSend = useCallback(
+    (text: string, options?: { attachments?: ChatAttachment[] }) => {
+      if (editing && editMessage) {
+        editMessage(editing.id, text);
+        setEditing(null);
+        return;
+      }
+      send(text, options);
+    },
+    [editing, editMessage, send],
+  );
+
+  // Follow-up chips: from the reply's own suggestions, or the app's function.
+  const withFollowUps = useCallback(
+    (message: ChatMessage): ChatMessage => {
+      if (followUps === false || message.role !== 'assistant') return message;
+      if (!followUps) return message;
+      const generated = followUps(message);
+      return generated?.length ? { ...message, suggestions: generated } : message;
+    },
+    [followUps],
+  );
+
+  const handleSuggestion = useCallback((text: string) => send(text), [send]);
 
   // Read-aloud: one message at a time; tapping again stops it.
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -151,8 +228,11 @@ function ChatViewInner({
         renderMessage(item, data.length - 1 - index)
       ) : (
         <MessageBubble
-          message={item}
+          message={item.id === lastAssistantId ? withFollowUps(item) : item}
           isLast={item.id === lastAssistantId}
+          onFeedback={onFeedback ? handleFeedback : undefined}
+          onEdit={allowEdit && editMessage && item.id === lastUserId && !isStreaming ? startEdit : undefined}
+          onSuggestionPress={followUps === false ? undefined : handleSuggestion}
           onRetry={retry}
           onCopyMessage={onCopyMessage}
           onCopyCode={onCopyCode}
@@ -180,6 +260,16 @@ function ChatViewInner({
       speech,
       onSpeak,
       speakingId,
+      withFollowUps,
+      onFeedback,
+      handleFeedback,
+      allowEdit,
+      editMessage,
+      lastUserId,
+      isStreaming,
+      startEdit,
+      followUps,
+      handleSuggestion,
     ],
   );
 
@@ -201,7 +291,7 @@ function ChatViewInner({
         <Pressable style={styles.empty} onPress={Keyboard.dismiss} accessible={false}>
           {emptyState ?? (
             <Text style={[{ color: theme.colors.text, fontSize: theme.fontSize * 1.4, textAlign: 'center' }, fontStyle(theme, 'bold')]}>
-              How can I help?
+              {labels.emptyTitle}
             </Text>
           )}
           {suggestions?.length ? (
@@ -240,7 +330,7 @@ function ChatViewInner({
           {showJump ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Scroll to latest message"
+              accessibilityLabel={labels.scrollToLatest}
               onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
               style={[styles.jump, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}
             >
@@ -250,7 +340,9 @@ function ChatViewInner({
         </View>
       )}
       <Composer
-        onSend={send}
+        onSend={handleSend}
+        editing={editing}
+        onCancelEdit={() => setEditing(null)}
         onStop={stop}
         isStreaming={isStreaming}
         placeholder={placeholder}

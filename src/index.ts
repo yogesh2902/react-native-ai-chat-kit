@@ -65,6 +65,10 @@ export { parseBlocks, parseInline } from './markdown/parse';
 export type { Block, InlineNode } from './markdown/parse';
 export { highlight } from './markdown/highlight';
 
+// Labels (translations)
+export { defaultLabels, mergeLabels, useChatLabels, ChatLabelsContext } from './labels';
+export type { ChatLabels, ChatLabelsOverrides } from './labels';
+
 // Theme
 export { lightTheme, darkTheme, mergeTheme, useChatTheme, ChatThemeContext, fontStyle } from './theme';
 export type { ChatTheme, ChatThemeOverrides } from './theme';

@@ -15,6 +15,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
+import { useChatLabels } from '../labels';
 import { fontStyle, useChatTheme } from '../theme';
 import type { ChatAttachment } from '../types';
 import type {
@@ -55,6 +56,9 @@ export type ComposerProps = {
   voice?: SpeechRecognizer;
   /** Send automatically when the user stops speaking. Default false (text lands in the input to review). */
   autoSendVoice?: boolean;
+  /** Put the composer in edit mode: fills the input with `text` and shows an "Editing" banner. Change `key` to start a new edit. */
+  editing?: { key: string; text: string } | null;
+  onCancelEdit?: () => void;
 };
 
 const formatBytes = (n?: number) =>
@@ -64,7 +68,7 @@ export function Composer({
   onSend,
   onStop,
   isStreaming,
-  placeholder = 'Message',
+  placeholder,
   disabled,
   bottomInset = 0,
   inputProps,
@@ -79,8 +83,11 @@ export function Composer({
   maxAttachments = 5,
   voice,
   autoSendVoice = false,
+  editing,
+  onCancelEdit,
 }: ComposerProps) {
   const theme = useChatTheme();
+  const labels = useChatLabels();
   const { colors } = theme;
   const [text, setText] = useState('');
   const [pending, setPending] = useState<ChatAttachment[]>([]);
@@ -103,6 +110,13 @@ export function Composer({
     if (errorTimer.current) clearTimeout(errorTimer.current);
   }, []);
 
+  // Entering edit mode loads the message into the input.
+  const editKey = editing?.key;
+  useEffect(() => {
+    if (editing) setText(editing.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editKey]);
+
   const submit = (value = text) => {
     if (disabled || isStreaming || picking) return;
     if (!value.trim() && pending.length === 0) return;
@@ -113,26 +127,26 @@ export function Composer({
 
   // ---- Attachments ----
   const pickerOptions = [
-    pickers?.pickImages && { key: 'images', label: 'Photos', icon: '🖼', run: pickers.pickImages },
-    pickers?.takePhoto && { key: 'camera', label: 'Camera', icon: '📷', run: pickers.takePhoto },
-    pickers?.pickDocuments && { key: 'files', label: 'Files', icon: '📄', run: pickers.pickDocuments },
+    pickers?.pickImages && { key: 'images', label: labels.photos, icon: '🖼', run: pickers.pickImages },
+    pickers?.takePhoto && { key: 'camera', label: labels.camera, icon: '📷', run: pickers.takePhoto },
+    pickers?.pickDocuments && { key: 'files', label: labels.files, icon: '📄', run: pickers.pickDocuments },
   ].filter(Boolean) as { key: string; label: string; icon: string; run: () => Promise<ChatAttachment[]> }[];
 
   const runPicker = async (run: () => Promise<ChatAttachment[]>) => {
     setMenuOpen(false);
-    if (pending.length >= maxAttachments) return showError(`You can attach up to ${maxAttachments} files.`);
+    if (pending.length >= maxAttachments) return showError(labels.maxAttachments(maxAttachments));
     setPicking(true);
     try {
       const picked = await run();
       if (picked.length) {
         setPending((prev) => {
           const room = maxAttachments - prev.length;
-          if (picked.length > room) showError(`Only ${maxAttachments} attachments per message; extra ones were skipped.`);
+          if (picked.length > room) showError(labels.attachmentsSkipped(maxAttachments));
           return [...prev, ...picked.slice(0, Math.max(0, room))];
         });
       }
     } catch (e) {
-      showError(e instanceof Error ? e.message : 'Could not attach that file.');
+      showError(e instanceof Error ? e.message : labels.attachFailed);
     } finally {
       setPicking(false);
     }
@@ -167,7 +181,7 @@ export function Composer({
       });
     } catch (e) {
       setListening(false);
-      showError(e instanceof Error ? e.message : 'Voice input failed.');
+      showError(e instanceof Error ? e.message : labels.voiceFailed);
     }
   };
   const stopListening = () => void voice?.stop();
@@ -183,13 +197,13 @@ export function Composer({
     actionButton = renderStopButton ? (
       renderStopButton({ onPress: onStop })
     ) : (
-      <Pressable accessibilityRole="button" accessibilityLabel="Stop generating" onPress={onStop} style={[styles.button, { backgroundColor: colors.accent }]}>
+      <Pressable accessibilityRole="button" accessibilityLabel={labels.stopGenerating} onPress={onStop} style={[styles.button, { backgroundColor: colors.accent }]}>
         <View style={[styles.stopIcon, { backgroundColor: colors.onAccent }]} />
       </Pressable>
     );
   } else if (listening) {
     actionButton = (
-      <Pressable accessibilityRole="button" accessibilityLabel="Stop listening" onPress={stopListening} style={[styles.button, { backgroundColor: colors.danger }]}>
+      <Pressable accessibilityRole="button" accessibilityLabel={labels.stopListening} onPress={stopListening} style={[styles.button, { backgroundColor: colors.danger }]}>
         <PulsingDot />
       </Pressable>
     );
@@ -197,7 +211,7 @@ export function Composer({
     actionButton = (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Voice input"
+        accessibilityLabel={labels.voiceInput}
         onPress={startListening}
         style={({ pressed }) => [styles.button, { backgroundColor: colors.accent, opacity: pressed ? 0.7 : 1 }]}
       >
@@ -210,7 +224,7 @@ export function Composer({
     actionButton = (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Send message"
+        accessibilityLabel={labels.sendMessage}
         accessibilityState={{ disabled: !canSend }}
         disabled={!canSend}
         onPress={() => submit()}
@@ -229,13 +243,30 @@ export function Composer({
         </Text>
       ) : null}
 
+      {editing ? (
+        <View style={[styles.editBanner, { borderColor: colors.border }]}>
+          <Text style={[{ color: colors.textMuted, fontSize: 13 }, fontStyle(theme, 'bold')]}>✎ {labels.editing}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={labels.cancelEdit}
+            hitSlop={8}
+            onPress={() => {
+              setText('');
+              onCancelEdit?.();
+            }}
+          >
+            <Text style={[{ color: colors.accent, fontSize: 13 }, fontStyle(theme, 'bold')]}>{labels.cancelEdit}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {menuOpen ? (
         <View style={[styles.menu, { backgroundColor: colors.inputBackground, borderColor: colors.border, borderRadius: theme.radius * 0.7 }]}>
           {pickerOptions.map((o) => (
             <Pressable
               key={o.key}
               accessibilityRole="button"
-              accessibilityLabel={`Attach from ${o.label}`}
+              accessibilityLabel={labels.attachFrom(o.label)}
               onPress={() => void runPicker(o.run)}
               style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.6 : 1 }]}
             >
@@ -266,7 +297,7 @@ export function Composer({
                 )}
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Remove ${a.name}`}
+                  accessibilityLabel={labels.removeAttachment(a.name)}
                   hitSlop={8}
                   onPress={() => setPending((prev) => prev.filter((p) => p.id !== a.id))}
                   style={[styles.remove, { backgroundColor: colors.text }]}
@@ -287,7 +318,7 @@ export function Composer({
           {pickerOptions.length > 0 ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Add attachment"
+              accessibilityLabel={labels.addAttachment}
               accessibilityState={{ expanded: menuOpen }}
               onPress={onAttachPress}
               disabled={picking || listening}
@@ -301,11 +332,11 @@ export function Composer({
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder={listening ? 'Listening…' : placeholder}
+            placeholder={listening ? labels.listening : placeholder ?? labels.placeholder}
             placeholderTextColor={listening ? colors.danger : colors.textMuted}
             multiline
             editable={!disabled && !listening}
-            accessibilityLabel="Message input"
+            accessibilityLabel={labels.messageInput}
             style={[
               styles.input,
               { color: colors.text, fontSize: theme.fontSize },
@@ -361,6 +392,7 @@ function PulsingDot() {
 const styles = StyleSheet.create({
   wrap: { paddingHorizontal: 12, paddingTop: 8 },
   error: { fontSize: 13, marginBottom: 6, marginHorizontal: 4 },
+  editBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, marginHorizontal: 4 },
   menu: { flexDirection: 'row', alignSelf: 'flex-start', borderWidth: StyleSheet.hairlineWidth, marginBottom: 8, paddingHorizontal: 4 },
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10 },
   menuIcon: { fontSize: 16 },

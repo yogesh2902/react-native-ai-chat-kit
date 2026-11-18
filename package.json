@@ -1,6 +1,6 @@
 {
   "name": "react-native-ai-chat-kit",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Drop-in AI chat UI for React Native & Expo: streaming markdown, chat history, image/document sharing, voice, and one-line OpenAI / Claude / Gemini setup.",
   "author": "Yogesh Bansal (https://github.com/yogesh2902)",
   "license": "MIT",

@@ -2,7 +2,9 @@ import { getMessageText, type ChatChunk, type ChatMessage, type ChatTransport } 
 
 export type MockStep =
   | { text: string }
-  | { tool: { name: string; label?: string; args?: unknown; durationMs?: number; result?: unknown; error?: string } };
+  | { tool: { name: string; label?: string; args?: unknown; durationMs?: number; result?: unknown; error?: string } }
+  /** Follow-up chips shown under the reply. */
+  | { suggestions: string[] };
 
 export type MockTransportOptions = {
   /** Return the script for a reply. Defaults to a rotating set of demo answers. */
@@ -119,9 +121,13 @@ function defaultReply(messages: ChatMessage[]): MockStep[] {
   if (withFiles) return withFiles;
   const text = last ? getMessageText(last).toLowerCase() : '';
   if (/before|earlier|previous|remember|recap|summar/.test(text)) return recapReply(messages);
-  if (/trip|flight|travel|book|plan/.test(text)) return DEMO_REPLIES[1]!;
-  if (/code|setup|install|use|how/.test(text)) return DEMO_REPLIES[2]!;
-  return DEMO_REPLIES[0]!;
+  if (/trip|flight|travel|book|plan/.test(text)) {
+    return [...DEMO_REPLIES[1]!, { suggestions: ['Show cheaper flights', 'Hold the Akasa seat', 'What can I do in Goa?'] }];
+  }
+  if (/code|setup|install|use|how/.test(text)) {
+    return [...DEMO_REPLIES[2]!, { suggestions: ['How do I add chat history?', 'Connect a real model'] }];
+  }
+  return [...DEMO_REPLIES[0]!, { suggestions: ['Plan a trip to Goa', 'Show me the setup code'] }];
 }
 
 /** A fake streaming backend for demos, Storybook, tests and offline development. */
@@ -136,7 +142,9 @@ export function createMockTransport(options: MockTransportOptions = {}): ChatTra
     await sleep(initialDelayMs, signal);
     for (const step of steps) {
       if (signal.aborted) return;
-      if ('text' in step) {
+      if ('suggestions' in step) {
+        yield { type: 'suggestions', suggestions: step.suggestions };
+      } else if ('text' in step) {
         for (const token of tokenize(step.text)) {
           if (signal.aborted) return;
           yield { type: 'text-delta', text: token };

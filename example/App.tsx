@@ -21,6 +21,7 @@ import {
   darkTheme,
   lightTheme,
   useChatSessions,
+  type ChatLabelsOverrides,
   type ChatStyles,
   type SpeechRecognizer,
   type ChatThemeOverrides,
@@ -75,6 +76,32 @@ function createDemoSpeechRecognizer(): SpeechRecognizer {
   };
 }
 
+// ---- Translation demo (अ button): every label can be overridden ----
+const hindi: ChatLabelsOverrides = {
+  placeholder: 'कुछ भी पूछें…',
+  emptyTitle: 'मैं कैसे मदद करूँ?',
+  copy: 'कॉपी',
+  copied: 'कॉपी हो गया ✓',
+  retry: 'फिर से',
+  listen: '🔊 सुनें',
+  stopSpeaking: '■ रोकें',
+  edit: 'बदलें',
+  editing: 'संदेश बदल रहे हैं',
+  cancelEdit: 'रद्द करें',
+  stopped: 'रोका गया',
+  toolRunning: 'काम चल रहा है…',
+  toolDone: 'पूरा हुआ',
+  chats: 'चैट',
+  newChat: '＋ नई चैट',
+  searchChats: 'चैट खोजें',
+  noChats: 'अभी कोई चैट नहीं',
+  clearAllChats: 'सभी चैट हटाएं',
+  today: 'आज',
+  yesterday: 'कल',
+  previous7Days: 'पिछले 7 दिन',
+  previous30Days: 'पिछले 30 दिन',
+};
+
 // ---- Customization demo (🎨 button): a brand look built only from public props ----
 const BRAND = '#7C3AED';
 const brandTheme: ChatThemeOverrides = {
@@ -120,6 +147,7 @@ function Demo() {
   const colors = (scheme === 'dark' ? darkTheme : lightTheme).colors;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [branded, setBranded] = useState(false);
+  const [inHindi, setInHindi] = useState(false);
 
   const transport = useMemo(
     () => (CHAT_URL ? createStreamTransport({ url: CHAT_URL }) : createMockTransport()),
@@ -134,7 +162,9 @@ function Demo() {
       <ChatView
         {...chat}
         colorScheme={scheme}
-        placeholder="Ask anything…"
+        labels={inHindi ? hindi : undefined}
+        placeholder={inHindi ? undefined : 'Ask anything…'}
+        onFeedback={(message, rating) => console.log('[feedback]', rating, message.id)}
         suggestions={['What can you render?', 'Plan a trip to Goa', 'Show me the setup code']}
         onCopyCode={(code) => Clipboard.setStringAsync(code)}
         onCopyMessage={(text) => Clipboard.setStringAsync(text)}
@@ -166,6 +196,7 @@ function Demo() {
               {activeTitle}
             </Text>
             <View style={styles.headerActions}>
+              <HeaderButton label="अ" color={colors.text} accessibilityLabel="Toggle Hindi labels" onPress={() => setInHindi(!inHindi)} />
               <HeaderButton label="🎨" color={colors.text} accessibilityLabel="Toggle brand style" onPress={() => setBranded(!branded)} />
               <HeaderButton
                 label={scheme === 'dark' ? '☀︎' : '☾'}
@@ -182,6 +213,7 @@ function Demo() {
       <SlideOver visible={historyOpen} onClose={() => setHistoryOpen(false)}>
         <ChatHistory
           colorScheme={scheme}
+          labels={inHindi ? hindi : undefined}
           sessions={chat.sessions}
           activeSessionId={chat.activeSessionId}
           isLoading={chat.isLoadingSessions}
