@@ -32,6 +32,13 @@ Also
 - Mock transport demo replies include follow-up suggestions.
 - README: screenshots gallery; fixed the `send` attachments docs.
 
+Fixes (found testing on iOS and Android)
+- iOS: the composer no longer sits partly behind the keyboard. Keyboard space is now measured on both platforms instead of using KeyboardAvoidingView, so `keyboardVerticalOffset` now means the gap between keyboard and composer.
+- iOS: the selected 👍/👎 is now clearly highlighted (tinted circle, full-color emoji).
+- Editing a message opens the keyboard on the input right away.
+- Chats that start with a photo or file get a real title ("📷 Photo", "📄 report.pdf") instead of "New chat".
+- The Edit button has a clean screen-reader label.
+
 ## 0.1.1
 
 - Fix: the composer's mic button now shows a recognizable microphone icon (it previously looked like a "0").

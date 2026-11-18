@@ -38,12 +38,21 @@ export function toMeta(session: ChatSession): ChatSessionMeta {
   return meta;
 }
 
-/** Build a short title from the first user message. */
+/**
+ * Build a short title: the first thing the user typed. A chat that started with
+ * only a photo or file is named after it ("📷 Photo", "📄 report.pdf").
+ */
 export function deriveTitle(messages: ChatMessage[], maxLength = 48): string {
-  const first = messages.find((m) => m.role === 'user');
-  const text = (first ? getMessageText(first) : '').replace(/\s+/g, ' ').trim();
-  if (!text) return 'New chat';
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
+  const users = messages.filter((m) => m.role === 'user');
+  const typed = users.map((m) => getMessageText(m).replace(/\s+/g, ' ').trim()).find(Boolean);
+  if (typed) return typed.length > maxLength ? `${typed.slice(0, maxLength - 1).trimEnd()}…` : typed;
+  for (const m of users) {
+    for (const part of m.parts) {
+      if (part.type === 'image') return '📷 Photo';
+      if (part.type === 'file') return `📄 ${part.name}`.slice(0, maxLength);
+    }
+  }
+  return 'New chat';
 }
 
 export function derivePreview(messages: ChatMessage[], maxLength = 90): string {
