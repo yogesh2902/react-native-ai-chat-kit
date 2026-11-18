@@ -1,0 +1,149 @@
+import { createContext, useContext } from 'react';
+
+/**
+ * Every piece of text the kit shows or announces to screen readers.
+ * Pass a partial object to `<ChatView labels={…}>` / `<ChatHistory labels={…}>`
+ * to translate or reword any of it.
+ */
+export type ChatLabels = {
+  // Composer
+  placeholder: string;
+  listening: string;
+  messageInput: string;
+  sendMessage: string;
+  stopGenerating: string;
+  voiceInput: string;
+  stopListening: string;
+  addAttachment: string;
+  photos: string;
+  camera: string;
+  files: string;
+  attachFrom: (source: string) => string;
+  removeAttachment: (name: string) => string;
+  maxAttachments: (max: number) => string;
+  attachmentsSkipped: (max: number) => string;
+  attachFailed: string;
+  voiceFailed: string;
+  editing: string;
+  cancelEdit: string;
+
+  // Chat
+  emptyTitle: string;
+  scrollToLatest: string;
+
+  // Message actions and states
+  copy: string;
+  copied: string;
+  copyCode: string;
+  retry: string;
+  listen: string;
+  stopSpeaking: string;
+  edit: string;
+  helpful: string;
+  notHelpful: string;
+  stopped: string;
+  errorFallback: string;
+  suggestionsHint: string;
+
+  // Tool cards
+  toolRunning: string;
+  toolDone: string;
+  toolFailed: string;
+
+  // History
+  chats: string;
+  newChat: string;
+  searchChats: string;
+  noChats: string;
+  noMatches: string;
+  clearAllChats: string;
+  clearAllConfirm: (count: number) => string;
+  deleteAll: string;
+  delete: string;
+  deleteChat: (title: string) => string;
+  cancel: string;
+  longPressToDelete: string;
+  closeHistory: string;
+  today: string;
+  yesterday: string;
+  previous7Days: string;
+  previous30Days: string;
+  /** Short month names, January first. */
+  months: string[];
+};
+
+export type ChatLabelsOverrides = Partial<ChatLabels>;
+
+export const defaultLabels: ChatLabels = {
+  placeholder: 'Message',
+  listening: 'Listening…',
+  messageInput: 'Message input',
+  sendMessage: 'Send message',
+  stopGenerating: 'Stop generating',
+  voiceInput: 'Voice input',
+  stopListening: 'Stop listening',
+  addAttachment: 'Add attachment',
+  photos: 'Photos',
+  camera: 'Camera',
+  files: 'Files',
+  attachFrom: (source) => `Attach from ${source}`,
+  removeAttachment: (name) => `Remove ${name}`,
+  maxAttachments: (max) => `You can attach up to ${max} files.`,
+  attachmentsSkipped: (max) => `Only ${max} attachments per message; extra ones were skipped.`,
+  attachFailed: 'Could not attach that file.',
+  voiceFailed: 'Voice input failed.',
+  editing: 'Editing message',
+  cancelEdit: 'Cancel',
+
+  emptyTitle: 'How can I help?',
+  scrollToLatest: 'Scroll to latest message',
+
+  copy: 'Copy',
+  copied: 'Copied ✓',
+  copyCode: 'Copy code',
+  retry: 'Retry',
+  listen: '🔊 Listen',
+  stopSpeaking: '■ Stop',
+  edit: 'Edit',
+  helpful: 'Helpful',
+  notHelpful: 'Not helpful',
+  stopped: 'Stopped',
+  errorFallback: 'Something went wrong.',
+  suggestionsHint: 'Suggested follow-ups',
+
+  toolRunning: 'Working…',
+  toolDone: 'Done',
+  toolFailed: 'Failed',
+
+  chats: 'Chats',
+  newChat: '＋ New chat',
+  searchChats: 'Search chats',
+  noChats: 'No conversations yet',
+  noMatches: 'No matching chats',
+  clearAllChats: 'Clear all chats',
+  clearAllConfirm: (count) => `${count === 1 ? 'Delete this chat' : `Delete all ${count} chats`}? This can't be undone.`,
+  deleteAll: 'Delete all',
+  delete: 'Delete',
+  deleteChat: (title) => `Delete ${title}`,
+  cancel: 'Cancel',
+  longPressToDelete: 'Long press to delete',
+  closeHistory: 'Close history',
+  today: 'Today',
+  yesterday: 'Yesterday',
+  previous7Days: 'Previous 7 days',
+  previous30Days: 'Previous 30 days',
+  months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+};
+
+export function mergeLabels(overrides?: ChatLabelsOverrides): ChatLabels {
+  if (!overrides) return defaultLabels;
+  const merged = { ...defaultLabels };
+  for (const key of Object.keys(overrides) as (keyof ChatLabels)[]) {
+    const value = overrides[key];
+    if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  return merged;
+}
+
+export const ChatLabelsContext = createContext<ChatLabels>(defaultLabels);
+export const useChatLabels = () => useContext(ChatLabelsContext);

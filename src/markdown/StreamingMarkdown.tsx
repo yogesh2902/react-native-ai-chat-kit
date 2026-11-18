@@ -1,5 +1,6 @@
 import React, { memo, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { useChatLabels } from '../labels';
 import { fontStyle, useChatTheme, type ChatTheme } from '../theme';
 import { highlight } from './highlight';
 import { parseBlocks, parseInline, type Block, type InlineNode } from './parse';
@@ -188,6 +189,7 @@ function Inline({ nodes, ctx }: { nodes: InlineNode[]; ctx: Ctx }) {
 
 function CodeBlock({ code, lang, ctx, style }: { code: string; lang: string; ctx: Ctx; style: any }) {
   const { theme } = ctx;
+  const labels = useChatLabels();
   const [copied, setCopied] = useState(false);
   const tokens = useMemo(() => highlight(code, lang), [code, lang]);
   const syntaxColor = (kind: string) =>
@@ -200,7 +202,7 @@ function CodeBlock({ code, lang, ctx, style }: { code: string; lang: string; ctx
         {ctx.onCopyCode ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Copy code"
+            accessibilityLabel={labels.copyCode}
             hitSlop={8}
             onPress={() => {
               ctx.onCopyCode?.(code);
@@ -208,7 +210,7 @@ function CodeBlock({ code, lang, ctx, style }: { code: string; lang: string; ctx
               setTimeout(() => setCopied(false), 1500);
             }}
           >
-            <Text style={styles.copy}>{copied ? 'Copied ✓' : 'Copy'}</Text>
+            <Text style={styles.copy}>{copied ? labels.copied : labels.copy}</Text>
           </Pressable>
         ) : null}
       </View>

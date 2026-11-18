@@ -25,6 +25,10 @@ export const parseNative: StreamParser = (data) => {
       return [{ type: 'tool-call-start', id: String(obj.id), name: String(obj.name), label: obj.label, args: obj.args }];
     case 'tool-call-end':
       return [{ type: 'tool-call-end', id: String(obj.id), result: obj.result, error: obj.error }];
+    case 'suggestions':
+      return Array.isArray(obj.suggestions)
+        ? [{ type: 'suggestions', suggestions: obj.suggestions.filter((x: unknown): x is string => typeof x === 'string') }]
+        : [];
     case 'error':
       return typeof obj.message === 'string' ? [{ type: 'error', message: obj.message }] : [];
     default:

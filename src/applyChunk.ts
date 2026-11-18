@@ -41,6 +41,10 @@ export function applyChunk(message: ChatMessage, chunk: ChatChunk): ChatMessage 
         ),
       };
     }
+    case 'suggestions': {
+      const suggestions = chunk.suggestions.map((s) => s.trim()).filter(Boolean).slice(0, 6);
+      return suggestions.length ? { ...message, suggestions } : message;
+    }
     case 'error':
       return { ...message, status: 'error', error: chunk.message };
     default:

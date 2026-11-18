@@ -30,6 +30,13 @@ export type UseChatResult = {
   retry: () => void;
   clear: () => void;
   setMessages: (messages: ChatMessage[]) => void;
+  /** Save a thumbs up/down on an assistant reply (`null` clears it). Kept with the message, so chat history keeps it too. */
+  rateMessage: (id: string, rating: 'up' | 'down' | null) => void;
+  /**
+   * Replace a user message with new text and get a fresh reply. Everything
+   * after that message is dropped (like editing in ChatGPT); its attachments are kept.
+   */
+  editMessage: (id: string, text: string) => void;
 };
 
 const defaultId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -178,6 +185,47 @@ export function useChat(options: UseChatOptions): UseChatResult {
     void run(history, assistant.id);
   }, [commit, run]);
 
+  const rateMessage = useCallback(
+    (id: string, rating: 'up' | 'down' | null) => {
+      updateMessage(id, (m) => {
+        if (m.role !== 'assistant') return m;
+        if (rating === null) {
+          if (m.rating === undefined) return m;
+          const { rating: _old, ...rest } = m;
+          return rest;
+        }
+        return m.rating === rating ? m : { ...m, rating };
+      });
+    },
+    [updateMessage],
+  );
+
+  const editMessage = useCallback(
+    (id: string, text: string) => {
+      const trimmed = text.trim();
+      if (controllerRef.current) return; // wait for the current reply to finish or be stopped
+      const list = messagesRef.current;
+      const index = list.findIndex((m) => m.id === id);
+      const original = list[index];
+      if (!original || original.role !== 'user') return;
+      const keptParts = original.parts.filter((p) => p.type !== 'text');
+      if (!trimmed && keptParts.length === 0) return;
+
+      const makeId = optionsRef.current.generateId ?? defaultId;
+      const edited: ChatMessage = {
+        ...original,
+        id: makeId(),
+        parts: trimmed ? [...keptParts, { type: 'text', text: trimmed }] : keptParts,
+        createdAt: Date.now(),
+      };
+      const history = [...list.slice(0, index), edited];
+      const assistant: ChatMessage = { id: makeId(), role: 'assistant', parts: [], createdAt: Date.now(), status: 'streaming' };
+      commit([...history, assistant]);
+      void run(history, assistant.id);
+    },
+    [commit, run],
+  );
+
   const clear = useCallback(() => {
     controllerRef.current?.abort();
     commit([]);
@@ -204,6 +252,8 @@ export function useChat(options: UseChatOptions): UseChatResult {
     stop,
     retry,
     clear,
+    rateMessage,
+    editMessage,
     setMessages,
   };
 }

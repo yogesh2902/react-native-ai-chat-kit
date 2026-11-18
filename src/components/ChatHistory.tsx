@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { filterSessions, formatSessionTime, groupSessionsByDate } from '../sessions/groupSessions';
 import type { ChatSessionMeta } from '../sessions/store';
+import { ChatLabelsContext, mergeLabels, useChatLabels, type ChatLabelsOverrides } from '../labels';
 import { fontStyle, useChatTheme } from '../theme';
 import { ChatThemeProvider, type ThemeProps } from './ChatThemeProvider';
 
@@ -41,15 +42,20 @@ export type ChatHistoryProps = ThemeProps & {
   header?: React.ReactNode;
   emptyText?: string;
   style?: StyleProp<ViewStyle>;
+  /** Translate or reword any text on this screen. */
+  labels?: ChatLabelsOverrides;
   /** Render each row yourself. */
   renderItem?: (props: ChatHistoryItemRenderProps) => React.ReactNode;
 };
 
 /** A ChatGPT-style list of past conversations, grouped by date. */
-export function ChatHistory({ colorScheme, theme, ...props }: ChatHistoryProps) {
+export function ChatHistory({ colorScheme, theme, labels, ...props }: ChatHistoryProps) {
+  const merged = useMemo(() => mergeLabels(labels), [labels]);
   return (
     <ChatThemeProvider colorScheme={colorScheme} theme={theme}>
-      <ChatHistoryInner {...props} />
+      <ChatLabelsContext.Provider value={merged}>
+        <ChatHistoryInner {...props} />
+      </ChatLabelsContext.Provider>
     </ChatThemeProvider>
   );
 }
@@ -63,17 +69,18 @@ function ChatHistoryInner({
   onClearAll,
   isLoading,
   searchable = true,
-  title = 'Chats',
+  title,
   header,
-  emptyText = 'No conversations yet',
+  emptyText,
   style,
   renderItem: renderCustomItem,
-}: Omit<ChatHistoryProps, keyof ThemeProps>) {
+}: Omit<ChatHistoryProps, keyof ThemeProps | 'labels'>) {
   const theme = useChatTheme();
+  const labels = useChatLabels();
   const [query, setQuery] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
-  const sections = useMemo(() => groupSessionsByDate(filterSessions(sessions, query)), [sessions, query]);
+  const sections = useMemo(() => groupSessionsByDate(filterSessions(sessions, query), Date.now(), labels), [sessions, query, labels]);
   const { colors } = theme;
   const regular = fontStyle(theme);
   const bold = fontStyle(theme, 'bold');
@@ -83,16 +90,16 @@ function ChatHistoryInner({
       {header}
       <View style={styles.top}>
         <Text accessibilityRole="header" style={[styles.title, { color: colors.text }, bold]}>
-          {title}
+          {title ?? labels.chats}
         </Text>
         {onNewChat ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="New chat"
+            accessibilityLabel={labels.newChat.replace(/^\W+\s*/, '')}
             onPress={onNewChat}
             style={({ pressed }) => [styles.newButton, { backgroundColor: colors.accent, opacity: pressed ? 0.7 : 1 }]}
           >
-            <Text style={[{ color: colors.onAccent, fontSize: 14 }, bold]}>＋ New chat</Text>
+            <Text style={[{ color: colors.onAccent, fontSize: 14 }, bold]}>{labels.newChat}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -102,9 +109,9 @@ function ChatHistoryInner({
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search chats"
+            placeholder={labels.searchChats}
             placeholderTextColor={colors.textMuted}
-            accessibilityLabel="Search chats"
+            accessibilityLabel={labels.searchChats}
             autoCorrect={false}
             style={[
               styles.searchInput,
@@ -126,45 +133,45 @@ function ChatHistoryInner({
           stickySectionHeadersEnabled={false}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
-            <Text style={[styles.empty, { color: colors.textMuted }, regular]}>{query ? 'No matching chats' : emptyText}</Text>
+            <Text style={[styles.empty, { color: colors.textMuted }, regular]}>{query ? labels.noMatches : emptyText ?? labels.noChats}</Text>
           }
           ListFooterComponent={
             onClearAll && sessions.length > 0 && !query ? (
               confirmingClear ? (
                 <View style={[styles.clearConfirm, { borderColor: colors.border }]}>
                   <Text style={[{ color: colors.text, fontSize: 14, textAlign: 'center' }, regular]}>
-                    {`${sessions.length === 1 ? 'Delete this chat' : `Delete all ${sessions.length} chats`}? This can't be undone.`}
+                    {labels.clearAllConfirm(sessions.length)}
                   </Text>
                   <View style={styles.clearActions}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Cancel"
+                      accessibilityLabel={labels.cancel}
                       onPress={() => setConfirmingClear(false)}
                       style={[styles.clearButton, { borderColor: colors.border, borderWidth: StyleSheet.hairlineWidth }]}
                     >
-                      <Text style={[{ color: colors.text }, bold]}>Cancel</Text>
+                      <Text style={[{ color: colors.text }, bold]}>{labels.cancel}</Text>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Delete all chats"
+                      accessibilityLabel={labels.deleteAll}
                       onPress={() => {
                         setConfirmingClear(false);
                         onClearAll();
                       }}
                       style={[styles.clearButton, { backgroundColor: colors.danger }]}
                     >
-                      <Text style={[styles.deleteText, bold]}>Delete all</Text>
+                      <Text style={[styles.deleteText, bold]}>{labels.deleteAll}</Text>
                     </Pressable>
                   </View>
                 </View>
               ) : (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Clear all chats"
+                  accessibilityLabel={labels.clearAllChats}
                   onPress={() => setConfirmingClear(true)}
                   style={({ pressed }) => [styles.clearLink, { opacity: pressed ? 0.6 : 1 }]}
                 >
-                  <Text style={[{ color: colors.danger, fontSize: 14 }, bold]}>Clear all chats</Text>
+                  <Text style={[{ color: colors.danger, fontSize: 14 }, bold]}>{labels.clearAllChats}</Text>
                 </Pressable>
               )
             ) : undefined
@@ -192,7 +199,7 @@ function ChatHistoryInner({
                 accessibilityRole="button"
                 accessibilityLabel={`${item.title}. ${item.preview}`}
                 accessibilityState={{ selected: active }}
-                accessibilityHint={onDelete ? 'Long press to delete' : undefined}
+                accessibilityHint={onDelete ? labels.longPressToDelete : undefined}
                 onPress={() => (confirming ? setConfirmingId(null) : onSelect(item.id))}
                 onLongPress={onDelete ? () => setConfirmingId(item.id) : undefined}
                 style={({ pressed }) => [
@@ -207,7 +214,7 @@ function ChatHistoryInner({
                       {item.title}
                     </Text>
                     {!confirming ? (
-                      <Text style={[styles.time, { color: colors.textMuted }, regular]}>{formatSessionTime(item.updatedAt)}</Text>
+                      <Text style={[styles.time, { color: colors.textMuted }, regular]}>{formatSessionTime(item.updatedAt, Date.now(), labels.months)}</Text>
                     ) : null}
                   </View>
                   {item.preview ? (
@@ -219,14 +226,14 @@ function ChatHistoryInner({
                 {confirming && onDelete ? (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`Delete ${item.title}`}
+                    accessibilityLabel={labels.deleteChat(item.title)}
                     onPress={() => {
                       setConfirmingId(null);
                       onDelete(item.id);
                     }}
                     style={[styles.delete, { backgroundColor: colors.danger }]}
                   >
-                    <Text style={[styles.deleteText, bold]}>Delete</Text>
+                    <Text style={[styles.deleteText, bold]}>{labels.delete}</Text>
                   </Pressable>
                 ) : null}
               </Pressable>
