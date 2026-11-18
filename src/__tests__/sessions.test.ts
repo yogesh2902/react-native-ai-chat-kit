@@ -169,3 +169,16 @@ describe('mock transport recap', () => {
     expect(text).toContain('1. Plan a trip to Goa');
   });
 });
+
+describe('deriveTitle with attachments', () => {
+  const user = (parts: ChatMessage['parts']): ChatMessage => ({ id: Math.random().toString(36), role: 'user', parts, createdAt: 0 });
+
+  it('uses the first typed text, even if the chat started with a photo', () => {
+    expect(deriveTitle([user([{ type: 'image', uri: 'a.jpg' }]), user([{ type: 'text', text: 'What is this?' }])])).toBe('What is this?');
+  });
+
+  it('names photo-only and file-only chats after the attachment', () => {
+    expect(deriveTitle([user([{ type: 'image', uri: 'a.jpg' }])])).toBe('📷 Photo');
+    expect(deriveTitle([user([{ type: 'file', name: 'report.pdf', mimeType: 'application/pdf' }])])).toBe('📄 report.pdf');
+  });
+});

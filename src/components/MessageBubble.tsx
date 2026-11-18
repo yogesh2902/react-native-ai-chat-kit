@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useChatLabels } from '../labels';
 import { StreamingMarkdown } from '../markdown/StreamingMarkdown';
-import { fontStyle, useChatTheme } from '../theme';
+import { fontStyle, useChatTheme, withAlpha } from '../theme';
 import { getMessageText, type ChatMessage } from '../types';
 import type { ChatLayout, ChatStyles, MessageAction, MessageRenderers, TypingIndicatorStyle } from './customization';
 import { FadeIn, usePressScale } from './animations';
@@ -197,7 +197,7 @@ function MessageBubbleImpl({
 
         {isUser && onEdit && message.status !== 'streaming' ? (
           <View style={styles.actions}>
-            <ActionButton label={`✎ ${labels.edit}`} onPress={() => onEdit(message)} />
+            <ActionButton label={`✎ ${labels.edit}`} accessibilityLabel={labels.edit} onPress={() => onEdit(message)} />
           </View>
         ) : null}
 
@@ -331,18 +331,20 @@ function Action({
       onPress={onPress}
       style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
         styles.iconButton,
-        { backgroundColor: selected || pressed || hovered ? theme.colors.inputBackground : 'transparent' },
+        {
+          backgroundColor: selected
+            ? withAlpha(theme.colors.accent, 0.18)
+            : pressed || hovered
+              ? theme.colors.inputBackground
+              : 'transparent',
+        },
       ]}
     >
-      <Text
-        style={[
-          styles.iconGlyph,
-          // Emoji can't be tinted, so unselected ones are dimmed instead.
-          emoji ? { opacity: selected ? 1 : 0.5 } : { color: selected ? theme.colors.accent : theme.colors.textMuted },
-        ]}
-      >
-        {icon}
-      </Text>
+      {/* Emoji can't be tinted, so unselected ones are dimmed. The opacity sits on a
+          View because iOS ignores it on emoji text. */}
+      <View style={{ opacity: emoji && !selected ? 0.45 : 1 }}>
+        <Text style={[styles.iconGlyph, !emoji && { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{icon}</Text>
+      </View>
     </Pressable>
   );
 }

@@ -3,7 +3,6 @@ import {
   FlatList,
   I18nManager,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -128,6 +127,10 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   /** Fully replace how a message renders. */
   renderMessage?: (message: ChatMessage, index: number) => React.ReactElement | null;
 
+  /**
+   * Space to leave between the keyboard and the composer, in points. The chat
+   * measures the keyboard itself, so headers above it no longer need an offset.
+   */
   keyboardVerticalOffset?: number;
   bottomInset?: number;
   composerProps?: Partial<ComposerProps>;
@@ -544,13 +547,9 @@ function ChatViewInner({
     </>
   );
 
-  // iOS: KeyboardAvoidingView works well. Android: pad by the measured keyboard overlap.
-  return Platform.OS === 'ios' ? (
-    <KeyboardAvoidingView style={rootStyle} behavior="padding" keyboardVerticalOffset={keyboardVerticalOffset}>
-      {body}
-    </KeyboardAvoidingView>
-  ) : (
-    <View ref={rootRef} style={[rootStyle, { paddingBottom: keyboard.overlap }]}>
+  // Both platforms: lift the chat by exactly how much of it the keyboard covers.
+  return (
+    <View ref={rootRef} style={[rootStyle, { paddingBottom: keyboard.overlap > 0 ? keyboard.overlap + keyboardVerticalOffset : 0 }]}>
       {body}
     </View>
   );

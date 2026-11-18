@@ -91,6 +91,7 @@ export function Composer({
   const { colors } = theme;
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const [pending, setPending] = useState<ChatAttachment[]>([]);
   const [picking, setPicking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -114,7 +115,11 @@ export function Composer({
   // Entering edit mode loads the message into the input.
   const editKey = editing?.key;
   useEffect(() => {
-    if (editing) setText(editing.text);
+    if (!editing) return;
+    setText(editing.text);
+    // Open the keyboard so the user can start typing right away.
+    const timer = setTimeout(() => inputRef.current?.focus(), 80);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editKey]);
 
@@ -334,6 +339,7 @@ export function Composer({
           ) : null}
           {accessoryLeft}
           <TextInput
+            ref={inputRef}
             value={text}
             onChangeText={setText}
             placeholder={listening ? labels.listening : placeholder ?? labels.placeholder}
