@@ -433,7 +433,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
-  title: { flex: 1, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  title: { flex: 1, fontSize: 16, fontWeight: '700', textAlign: 'left', marginLeft: 2 },
   headerActions: { flexDirection: 'row', gap: 14 },
   headerButton: { paddingHorizontal: 6, minWidth: 28, alignItems: 'center' },
   historyTop: { flexDirection: 'row', paddingHorizontal: 10 },
