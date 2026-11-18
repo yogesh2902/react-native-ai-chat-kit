@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/react-native-ai-chat-kit.svg)](https://www.npmjs.com/package/react-native-ai-chat-kit)
 [![CI](https://github.com/yogesh2902/react-native-ai-chat-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/yogesh2902/react-native-ai-chat-kit/actions/workflows/ci.yml)
-[![license](https://img.shields.io/npm/l/react-native-ai-chat-kit.svg)](LICENSE)
+[![license](https://img.shields.io/npm/l/react-native-ai-chat-kit.svg)](https://github.com/yogesh2902/react-native-ai-chat-kit/blob/main/LICENSE)
 
 **Add a ChatGPT-quality AI chat to your React Native or Expo app in minutes.**
 
@@ -10,20 +10,20 @@ Smooth streaming markdown, tool-call cards, chat history, stop/retry, dark mode,
 
 <table>
   <tr>
-    <td align="center" width="25%"><img src="docs/screenshots/01-welcome.png" width="200" alt="Empty chat screen with starter prompt suggestions"><br><sub>Starter suggestions</sub></td>
-    <td align="center" width="25%"><img src="docs/screenshots/02-code-answer.png" width="200" alt="Reply with a syntax-highlighted code block and Copy button"><br><sub>Code with highlighting</sub></td>
-    <td align="center" width="25%"><img src="docs/screenshots/03-tool-card-and-table.png" width="200" alt="Reply with a completed flight-search tool card and a table of flights"><br><sub>Tool cards and tables</sub></td>
-    <td align="center" width="25%"><img src="docs/screenshots/04-photo-attached.png" width="200" alt="Composer with an attached photo preview and a typed question"><br><sub>Photo and file sharing</sub></td>
+    <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/01-welcome.png" width="200" alt="Empty chat screen with starter prompt suggestions"><br><sub>Starter suggestions</sub></td>
+    <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/02-code-answer.png" width="200" alt="Reply with a syntax-highlighted code block and Copy button"><br><sub>Code with highlighting</sub></td>
+    <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/03-tool-card-and-table.png" width="200" alt="Reply with a completed flight-search tool card and a table of flights"><br><sub>Tool cards and tables</sub></td>
+    <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/04-photo-attached.png" width="200" alt="Composer with an attached photo preview and a typed question"><br><sub>Photo and file sharing</sub></td>
   </tr>
   <tr>
-    <td align="center" width="25%"><img src="docs/screenshots/05-photo-optimized.png" width="200" alt="Sent photo in the chat, and a reply listing it as 1568 by 1176 pixels, 114 KB"><br><sub>Photos optimized: 1.5 MB to 114 KB</sub></td>
-    <td align="center" width="25%"><img src="docs/screenshots/06-chat-history.png" width="200" alt="History screen listing today's chats with search and Clear all"><br><sub>Chat history</sub></td>
-    <td align="center" width="25%"><img src="docs/screenshots/07-dark-mode.png" width="200" alt="The flight search conversation in dark mode"><br><sub>Dark mode</sub></td>
-    <td align="center" width="25%"><img src="docs/screenshots/08-custom-theme.png" width="200" alt="Purple custom theme with an AI avatar and a custom flight card"><br><sub>Your brand: colors, avatars, cards</sub></td>
+    <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/05-photo-optimized.png" width="200" alt="Sent photo in the chat, and a reply listing it as 1568 by 1176 pixels, 114 KB"><br><sub>Photos optimized: 1.5 MB to 114 KB</sub></td>
+    <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/06-chat-history.png" width="200" alt="History screen listing today's chats with search and Clear all"><br><sub>Chat history</sub></td>
+    <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/07-dark-mode.png" width="200" alt="The flight search conversation in dark mode"><br><sub>Dark mode</sub></td>
+    <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/08-custom-theme.png" width="200" alt="Purple custom theme with an AI avatar and a custom flight card"><br><sub>Your brand: colors, avatars, cards</sub></td>
   </tr>
 </table>
 
-<sub>Real screenshots of the <a href="example">example app</a> (mock mode, no API key). A demo GIF is coming.</sub>
+<sub>Real screenshots of the <a href="https://github.com/yogesh2902/react-native-ai-chat-kit/tree/main/example">example app</a> (mock mode, no API key). A demo GIF is coming.</sub>
 
 ```tsx
 import { ChatView, useChat, createStreamTransport } from 'react-native-ai-chat-kit';
@@ -137,7 +137,7 @@ export const POST = handler;
 export const OPTIONS = handler;
 ```
 
-Copy-paste templates for Next.js, Cloudflare and plain Node, plus an `env.example`, are in [`templates/server`](templates/server).
+Copy-paste templates for Next.js, Cloudflare and plain Node, plus an `env.example`, are in [`templates/server`](https://github.com/yogesh2902/react-native-ai-chat-kit/tree/main/templates/server).
 
 **2. Set environment variables** on the server:
 
