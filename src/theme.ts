@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import { Platform, type TextStyle } from 'react-native';
+export { applyPalette, PALETTE_NAMES, withAlpha, type ChatPalette } from './palettes';
 
 export type ChatTheme = {
   colors: {

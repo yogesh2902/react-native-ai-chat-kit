@@ -49,10 +49,10 @@ export type ChatHistoryProps = ThemeProps & {
 };
 
 /** A ChatGPT-style list of past conversations, grouped by date. */
-export function ChatHistory({ colorScheme, theme, labels, ...props }: ChatHistoryProps) {
+export function ChatHistory({ colorScheme, theme, palette, labels, ...props }: ChatHistoryProps) {
   const merged = useMemo(() => mergeLabels(labels), [labels]);
   return (
-    <ChatThemeProvider colorScheme={colorScheme} theme={theme}>
+    <ChatThemeProvider colorScheme={colorScheme} theme={theme} palette={palette}>
       <ChatLabelsContext.Provider value={merged}>
         <ChatHistoryInner {...props} />
       </ChatLabelsContext.Provider>

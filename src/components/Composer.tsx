@@ -90,6 +90,7 @@ export function Composer({
   const labels = useChatLabels();
   const { colors } = theme;
   const [text, setText] = useState('');
+  const [focused, setFocused] = useState(false);
   const [pending, setPending] = useState<ChatAttachment[]>([]);
   const [picking, setPicking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -222,16 +223,7 @@ export function Composer({
     actionButton = renderSendButton({ onPress: () => submit(), disabled: !canSend });
   } else {
     actionButton = (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={labels.sendMessage}
-        accessibilityState={{ disabled: !canSend }}
-        disabled={!canSend}
-        onPress={() => submit()}
-        style={[styles.button, { backgroundColor: colors.accent, opacity: canSend ? 1 : 0.3 }]}
-      >
-        <Text style={[styles.arrow, { color: colors.onAccent }]}>↑</Text>
-      </Pressable>
+      <SendButton ready={canSend} onPress={() => submit()} label={labels.sendMessage} color={colors.accent} iconColor={colors.onAccent} mutedColor={colors.border} />
     );
   }
 
@@ -277,7 +269,19 @@ export function Composer({
         </View>
       ) : null}
 
-      <View style={[styles.box, { backgroundColor: colors.inputBackground, borderColor: colors.border, borderRadius: theme.radius + 4 }, boxStyle]}>
+      <View
+        style={[
+          styles.box,
+          {
+            backgroundColor: colors.inputBackground,
+            borderColor: focused || listening ? (listening ? colors.danger : colors.accent) : colors.border,
+            borderRadius: theme.radius + 6,
+            shadowColor: focused ? colors.accent : '#000',
+            shadowOpacity: focused ? 0.18 : 0.07,
+          },
+          boxStyle,
+        ]}
+      >
         {pending.length > 0 || picking ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.previews} contentContainerStyle={styles.previewsContent}>
             {pending.map((a) => (
@@ -353,6 +357,14 @@ export function Composer({
               }
             }}
             {...inputProps}
+            onFocus={(e) => {
+              setFocused(true);
+              inputProps?.onFocus?.(e);
+            }}
+            onBlur={(e) => {
+              setFocused(false);
+              inputProps?.onBlur?.(e);
+            }}
           />
           {accessoryRight}
           {actionButton}
@@ -363,6 +375,42 @@ export function Composer({
 }
 
 /** Microphone drawn with plain Views (no icon font or SVG dependency): capsule, U-shaped holder, stand, base. */
+/** Send button that pops in when there's something to send. */
+function SendButton({
+  ready,
+  onPress,
+  label,
+  color,
+  iconColor,
+  mutedColor,
+}: {
+  ready: boolean;
+  onPress: () => void;
+  label: string;
+  color: string;
+  iconColor: string;
+  mutedColor: string;
+}) {
+  const scale = useRef(new Animated.Value(ready ? 1 : 0.85)).current;
+  useEffect(() => {
+    Animated.spring(scale, { toValue: ready ? 1 : 0.85, useNativeDriver: Platform.OS !== 'web', speed: 24, bounciness: ready ? 12 : 0 }).start();
+  }, [ready, scale]);
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ disabled: !ready }}
+        disabled={!ready}
+        onPress={onPress}
+        style={({ pressed }) => [styles.button, { backgroundColor: ready ? color : mutedColor, opacity: pressed ? 0.8 : 1 }]}
+      >
+        <Text style={[styles.arrow, { color: ready ? iconColor : '#FFFFFF' }]}>↑</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 function MicIcon({ color }: { color: string }) {
   return (
     <View style={styles.micWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -396,7 +444,15 @@ const styles = StyleSheet.create({
   menu: { flexDirection: 'row', alignSelf: 'flex-start', borderWidth: StyleSheet.hairlineWidth, marginBottom: 8, paddingHorizontal: 4 },
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10 },
   menuIcon: { fontSize: 16 },
-  box: { borderWidth: StyleSheet.hairlineWidth, paddingLeft: 8, paddingRight: 6, paddingVertical: 6 },
+  box: {
+    borderWidth: 1,
+    paddingLeft: 8,
+    paddingRight: 6,
+    paddingVertical: 6,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
   previews: { marginBottom: 6 },
   previewsContent: { gap: 10, paddingTop: 6, paddingHorizontal: 4, paddingRight: 10 },
   previewItem: { position: 'relative' },
