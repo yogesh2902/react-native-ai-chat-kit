@@ -11,6 +11,8 @@ export type ChatSessionMeta = {
   messageCount: number;
   /** The model picked for this chat (model picker), restored when it is reopened. */
   model?: string;
+  /** Pinned chats are listed first in the history. */
+  pinned?: boolean;
 };
 
 export type ChatSession = ChatSessionMeta & { messages: ChatMessage[] };

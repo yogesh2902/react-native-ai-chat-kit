@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Platform, type StyleProp, type ViewStyle } from 'react-native';
 
 const useNativeDriver = Platform.OS !== 'web';
@@ -18,6 +18,23 @@ function useReduceMotion() {
     };
   }, []);
   return reduce;
+}
+
+/** True while the system "Reduce motion" setting is on (updates live). */
+export function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled?.()
+      .then((value) => mounted && setReduced(value))
+      .catch(() => {});
+    const sub = AccessibilityInfo.addEventListener?.('reduceMotionChanged', (value: boolean) => setReduced(value));
+    return () => {
+      mounted = false;
+      sub?.remove?.();
+    };
+  }, []);
+  return reduced;
 }
 
 /**

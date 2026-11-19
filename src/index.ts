@@ -1,5 +1,5 @@
 // Hook
-export { useChat, toReplyReference, allVersions } from './useChat';
+export { useChat, toReplyReference, allVersions, allBranches } from './useChat';
 export type { UseChatOptions, UseChatResult, SendOptions } from './useChat';
 
 // Conversation history
@@ -8,6 +8,8 @@ export type { UseChatSessionsOptions, UseChatSessionsResult } from './sessions/u
 export { createKeyValueStore, createMemoryStore, deriveTitle, derivePreview } from './sessions/store';
 export type { ChatStore, ChatSession, ChatSessionMeta, KeyValueStorage } from './sessions/store';
 export { groupSessionsByDate, formatSessionTime, filterSessions } from './sessions/groupSessions';
+export { exportChat, messagesContain } from './sessions/export';
+export type { ExportOptions } from './sessions/export';
 export type { SessionGroup } from './sessions/groupSessions';
 
 // Components
@@ -53,6 +55,8 @@ export type { ReasoningBlockProps } from './components/ReasoningBlock';
 export { SourceList, sourceDomain } from './components/SourceList';
 export type { SourceListProps } from './components/SourceList';
 export { ModelPicker } from './components/ModelPicker';
+export { ImageViewer } from './components/ImageViewer';
+export type { ImageViewerProps } from './components/ImageViewer';
 export type { ModelPickerProps, ChatModelOption } from './components/ModelPicker';
 export { MessageMenu } from './components/MessageMenu';
 export type { MessageMenuItem } from './components/MessageMenu';
@@ -67,10 +71,12 @@ export type { MessageBubbleProps } from './components/MessageBubble';
 export { Composer } from './components/Composer';
 export type { ComposerProps } from './components/Composer';
 export { ToolCallCard, humanizeToolName } from './components/ToolCallCard';
+export type { ToolCallCardProps } from './components/ToolCallCard';
 export { TypingIndicator } from './components/TypingIndicator';
 export type { TypingIndicatorProps } from './components/TypingIndicator';
-export { StreamingMarkdown, CodeBlockOptionsContext, lightCodeColors } from './markdown/StreamingMarkdown';
-export type { StreamingMarkdownProps, CodeBlockOptions } from './markdown/StreamingMarkdown';
+export { StreamingMarkdown, CodeBlockOptionsContext, MarkdownFeaturesContext, lightCodeColors } from './markdown/StreamingMarkdown';
+export type { StreamingMarkdownProps, CodeBlockOptions, MathOptions, MarkdownFeatures } from './markdown/StreamingMarkdown';
+export { texToUnicode } from './markdown/math';
 
 // Transports
 export { createStreamTransport, toSimpleMessages } from './transports/stream';
@@ -86,7 +92,7 @@ export type { StreamParser, SSEEvent } from './transports/parsers';
 
 // Markdown internals (useful for custom renderers)
 export { parseBlocks, parseInline } from './markdown/parse';
-export type { Block, InlineNode } from './markdown/parse';
+export type { Block, InlineNode, MarkdownOptions } from './markdown/parse';
 export { highlight } from './markdown/highlight';
 export type { Token, TokenKind } from './markdown/highlight';
 
@@ -113,7 +119,9 @@ export type {
   ReasoningPart,
   ChatSource,
   MessageVersion,
+  MessageBranch,
   ReplyReference,
+  ToolCallState,
   ToolCallPart,
   ImagePart,
   FilePart,

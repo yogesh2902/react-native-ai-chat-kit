@@ -1,5 +1,5 @@
-import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useRef } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useChatLabels } from '../labels';
 import { fontStyle, useChatTheme } from '../theme';
 import type { ChatMessage } from '../types';
@@ -15,11 +15,18 @@ export type MessageMenuItem = {
 /** Bottom sheet opened by long-pressing a message. */
 export function MessageMenu({
   message,
+  visible,
+  title,
   items,
   onClose,
   bottomInset = 0,
 }: {
-  message: ChatMessage | null;
+  /** Shows the sheet for this message. */
+  message?: ChatMessage | null;
+  /** Or show it directly (e.g. for a chat in the history). */
+  visible?: boolean;
+  /** Read by screen readers as the sheet's name. */
+  title?: string;
   items: MessageMenuItem[];
   onClose: () => void;
   bottomInset?: number;
@@ -27,15 +34,30 @@ export function MessageMenu({
   const theme = useChatTheme();
   const labels = useChatLabels();
   const { colors } = theme;
+  // On iOS a share sheet, alert or another modal can't open while this one is still
+  // closing, so the chosen action runs once it has fully dismissed.
+  const pending = useRef<(() => void) | null>(null);
+  const runPending = () => {
+    const action = pending.current;
+    pending.current = null;
+    action?.();
+  };
 
   return (
-    <Modal visible={!!message} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={visible ?? !!message}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      onDismiss={runPending}
+      statusBarTranslucent
+    >
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel={labels.closeMenu}>
         <Pressable
           // Taps inside the sheet don't close it.
           onPress={() => {}}
           accessibilityViewIsModal
-          accessibilityLabel={labels.messageOptions}
+          accessibilityLabel={title ?? labels.messageOptions}
           style={[styles.sheet, { backgroundColor: colors.background, paddingBottom: 12 + bottomInset, borderTopLeftRadius: theme.radius, borderTopRightRadius: theme.radius }]}
         >
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
@@ -45,8 +67,13 @@ export function MessageMenu({
               accessibilityRole="button"
               accessibilityLabel={item.label}
               onPress={() => {
-                onClose();
-                item.onPress();
+                if (Platform.OS === 'ios') {
+                  pending.current = item.onPress;
+                  onClose();
+                } else {
+                  onClose();
+                  item.onPress();
+                }
               }}
               style={({ pressed }) => [styles.item, { backgroundColor: pressed ? colors.inputBackground : 'transparent' }]}
             >

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   FlatList,
   I18nManager,
   Keyboard,
@@ -20,7 +21,8 @@ import { toSpeakableText } from '../markdown/plainText';
 import { isNetworkError } from '../adapters/network';
 import { getMessageText, type ChatAttachment, type ChatMessage, type ChatSource, type ReplyReference } from '../types';
 import { toReplyReference } from '../useChat';
-import { CodeBlockOptionsContext, type CodeBlockOptions } from '../markdown/StreamingMarkdown';
+import { CodeBlockOptionsContext, MarkdownFeaturesContext, type CodeBlockOptions, type MarkdownFeatures, type MathOptions } from '../markdown/StreamingMarkdown';
+import { ImageViewer } from './ImageViewer';
 import { ModelPicker, type ChatModelOption } from './ModelPicker';
 import { resolveCodeBlocks, resolveReasoning } from './featureSwitches';
 import { buildListItems, formatMessageTime, type ChatListItem } from './chatListItems';
@@ -95,6 +97,18 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   /** `editMessage` from useChat. When present, the latest user message gets an Edit action. Set `allowEdit={false}` to hide it. */
   editMessage?: (id: string, text: string) => void;
   allowEdit?: boolean;
+  /** Also edit older messages (long-press → Edit). The original stays as a branch (‹ 1/2 ›). Default false. */
+  editAnyMessage?: boolean;
+  /**
+   * Render LaTeX math in replies (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`) as readable Unicode. Default false,
+   * because `$` is common in normal text. Pass `{ render }` to use your own math renderer.
+   */
+  math?: boolean | MathOptions;
+  /** Tapping an image in a message. Defaults to the built-in full-screen viewer (`imageViewer={false}` turns it off). */
+  onImagePress?: (uri: string, alt?: string) => void;
+  imageViewer?: boolean;
+  /** `selectBranch` from useChat (spread in). Shows ‹ 1/2 › on edited messages. */
+  selectBranch?: (id: string, index: number) => void;
   /**
    * Follow-up chips under the latest reply. By default they come from the
    * reply itself (a `suggestions` stream event). Pass a function to create them
@@ -137,8 +151,10 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   reasoning?: boolean | 'collapsed' | 'expanded';
   /** Source chips under replies that cite pages. Default true. */
   showSources?: boolean;
-  /** Tapping a source chip. Defaults to opening its URL. */
+  /** Tapping a source chip or citation. Defaults to opening its URL. */
   onSourcePress?: (source: ChatSource, index: number) => void;
+  /** Turn [1], [2]… in replies into tappable superscripts that open the matching source. Default true. */
+  linkCitations?: boolean;
   /** `selectVersion` from useChat (spread in). Shows ‹ 2/3 › on regenerated replies. Set `replyVersions={false}` to hide it. */
   selectVersion?: (id: string, index: number) => void;
   replyVersions?: boolean;
@@ -159,6 +175,10 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
    * `true` (default) uses the defaults; `false` shows plain code (no colors, no line numbers).
    */
   codeBlocks?: boolean | CodeBlockOptions;
+  /** `respondToTool` from useChat (spread in). Shows Approve / Deny on tools that need the user's OK. */
+  respondToTool?: (toolCallId: string, approved: boolean) => void;
+  /** Called when the user approves or denies a tool, e.g. for analytics. */
+  onToolDecision?: (toolCallId: string, approved: boolean) => void;
   /** Haptic feedback on chat events. See createExpoHaptics. Off unless passed. */
   haptics?: ChatFeedbackHandler;
   /** Sounds on chat events. See createExpoSounds. Off unless passed. */
@@ -251,6 +271,14 @@ function ChatViewInner({
   codeBlocks,
   haptics,
   sounds,
+  respondToTool,
+  onToolDecision,
+  linkCitations = true,
+  editAnyMessage = false,
+  selectBranch,
+  math = false,
+  onImagePress,
+  imageViewer = true,
 }: Omit<ChatViewProps, keyof ThemeProps | 'labels'>) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -266,6 +294,8 @@ function ChatViewInner({
     feedbackRef.current.sounds?.(event);
   }, []);
 
+  const labelsRef = useRef(labels);
+  labelsRef.current = labels;
   // A reply finishing (or failing) is detected from the messages themselves,
   // so it works with any hook and with stop/retry.
   const lastStatusRef = useRef<{ id: string; status?: string } | null>(null);
@@ -280,8 +310,14 @@ function ChatViewInner({
     const previous = lastStatusRef.current;
     lastStatusRef.current = last ? { id: last.id, status: last.status } : null;
     if (!last || !previous || previous.id !== last.id || previous.status !== 'streaming') return;
-    if (last.status === 'done') feedback('replyDone');
-    else if (last.status === 'error') feedback('error');
+    // Screen readers: say when the answer is ready, since it streamed in silently.
+    if (last.status === 'done') {
+      feedback('replyDone');
+      AccessibilityInfo.announceForAccessibility?.(labelsRef.current.replyReady);
+    } else if (last.status === 'error') {
+      feedback('error');
+      AccessibilityInfo.announceForAccessibility?.(`${labelsRef.current.replyFailed}. ${last.error ?? ''}`.trim());
+    }
   }, [messages, feedback]);
 
   // Code block options, kept stable so finished blocks don't re-render on every token.
@@ -395,6 +431,31 @@ function ChatViewInner({
     flashTimer.current = setTimeout(() => setFlashId(null), 1400);
   }, []);
 
+  const handleToolDecision = useCallback(
+    (toolCallId: string, approved: boolean) => {
+      respondToTool?.(toolCallId, approved);
+      onToolDecision?.(toolCallId, approved);
+    },
+    [respondToTool, onToolDecision],
+  );
+
+  // Image viewer
+  const [viewing, setViewing] = useState<{ uri: string; alt?: string } | null>(null);
+  const handleImagePress = useMemo(
+    () => onImagePress ?? (imageViewer ? (uri: string, alt?: string) => setViewing({ uri, alt }) : undefined),
+    [onImagePress, imageViewer],
+  );
+  const mathRender = typeof math === 'object' ? math.render : undefined;
+  const markdownFeatures = useMemo<MarkdownFeatures>(
+    () => ({ math: math ? { render: mathRender } : undefined, onImagePress: handleImagePress }),
+    [!!math, mathRender, handleImagePress], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const handleSelectBranch = useCallback(
+    (message: ChatMessage, index: number) => selectBranch?.(message.id, index),
+    [selectBranch],
+  );
+
   const handleSelectVersion = useCallback(
     (message: ChatMessage, index: number) => selectVersion?.(message.id, index),
     [selectVersion],
@@ -440,7 +501,7 @@ function ChatViewInner({
       !messageActions ? [] : typeof messageActions === 'function' ? messageActions(message) : messageActions,
     [messageActions],
   );
-  const menuEnabled = !!messageActions || (allowDelete && !!deleteMessage) || allowReply;
+  const menuEnabled = !!messageActions || (allowDelete && !!deleteMessage) || allowReply || (editAnyMessage && allowEdit && !!editMessage);
   const [menuMessage, setMenuMessage] = useState<ChatMessage | null>(null);
   const openMenu = useCallback(
     (message: ChatMessage) => {
@@ -455,7 +516,7 @@ function ChatViewInner({
     const items: MessageMenuItem[] = [];
     if (allowReply && menuMessage.status !== 'streaming') items.push({ key: 'reply', icon: '↩\uFE0E', label: labels.reply, onPress: () => startReply(menuMessage) });
     if (onCopyMessage && text) items.push({ key: 'copy', icon: '⧉', label: labels.copy, onPress: () => onCopyMessage(text) });
-    if (menuMessage.role === 'user' && allowEdit && editMessage && menuMessage.id === lastUserId && !isStreaming) {
+    if (menuMessage.role === 'user' && allowEdit && editMessage && (editAnyMessage || menuMessage.id === lastUserId) && !isStreaming) {
       items.push({ key: 'edit', icon: '✎', label: labels.edit, onPress: () => startEdit(menuMessage) });
     }
     for (const action of actionsFor(menuMessage)) {
@@ -465,7 +526,7 @@ function ChatViewInner({
       items.push({ key: 'delete', icon: '🗑', label: labels.deleteMessage, destructive: true, onPress: () => deleteMessage(menuMessage.id) });
     }
     return items;
-  }, [menuMessage, onCopyMessage, labels, allowEdit, editMessage, lastUserId, isStreaming, startEdit, actionsFor, allowDelete, deleteMessage, allowReply, startReply]);
+  }, [menuMessage, onCopyMessage, labels, allowEdit, editMessage, lastUserId, isStreaming, startEdit, actionsFor, allowDelete, deleteMessage, allowReply, startReply, editAnyMessage]);
 
   // Offline banner, and retrying a reply that failed for lack of network once we're back.
   const [online, setOnline] = useState(() => network?.isOnline?.() ?? true);
@@ -545,6 +606,10 @@ function ChatViewInner({
           modelName={item.model && models ? modelNames.get(item.model) : undefined}
           rtl={dir === 'rtl'}
           highlighted={item.id === flashId}
+          onToolDecision={respondToTool || onToolDecision ? handleToolDecision : undefined}
+          linkCitations={linkCitations}
+          onSelectBranch={selectBranch && !isStreaming ? handleSelectBranch : undefined}
+          onImagePress={handleImagePress}
         />
       );
     },
@@ -598,6 +663,13 @@ function ChatViewInner({
       modelNames,
       dir,
       flashId,
+      respondToTool,
+      onToolDecision,
+      handleToolDecision,
+      linkCitations,
+      selectBranch,
+      handleSelectBranch,
+      handleImagePress,
     ],
   );
 
@@ -732,9 +804,12 @@ function ChatViewInner({
   // Both platforms: lift the chat by exactly how much of it the keyboard covers.
   return (
     <CodeBlockOptionsContext.Provider value={codeOptions}>
-      <View ref={rootRef} style={[rootStyle, { paddingBottom: keyboard.overlap > 0 ? keyboard.overlap + keyboardVerticalOffset : 0 }]}>
-        {body}
-      </View>
+      <MarkdownFeaturesContext.Provider value={markdownFeatures}>
+        <View ref={rootRef} style={[rootStyle, { paddingBottom: keyboard.overlap > 0 ? keyboard.overlap + keyboardVerticalOffset : 0 }]}>
+          {body}
+          {imageViewer && !onImagePress ? <ImageViewer image={viewing} onClose={() => setViewing(null)} /> : null}
+        </View>
+      </MarkdownFeaturesContext.Provider>
     </CodeBlockOptionsContext.Provider>
   );
 }

@@ -367,7 +367,7 @@ export function Composer({
               hitSlop={6}
               style={({ pressed }) => [styles.attach, { opacity: pressed || picking || listening ? 0.5 : 1 }]}
             >
-              <Text style={[styles.attachIcon, { color: colors.textMuted, transform: [{ rotate: menuOpen ? '45deg' : '0deg' }] }]}>＋</Text>
+              <Text maxFontSizeMultiplier={1.3} style={[styles.attachIcon, { color: colors.textMuted, transform: [{ rotate: menuOpen ? '45deg' : '0deg' }] }]}>＋</Text>
             </Pressable>
           ) : null}
           {accessoryLeft}
@@ -444,7 +444,7 @@ function SendButton({
         onPress={onPress}
         style={({ pressed }) => [styles.button, { backgroundColor: ready ? color : mutedColor, opacity: pressed ? 0.8 : 1 }]}
       >
-        <Text style={[styles.arrow, { color: ready ? iconColor : '#FFFFFF' }]}>↑</Text>
+        <Text maxFontSizeMultiplier={1.3} style={[styles.arrow, { color: ready ? iconColor : '#FFFFFF' }]}>↑</Text>
       </Pressable>
     </Animated.View>
   );

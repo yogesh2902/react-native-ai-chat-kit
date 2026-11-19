@@ -37,8 +37,16 @@ export const parseNative: StreamParser = (data) => {
       return [{ type: 'tool-call-start', id: String(obj.id), name: String(obj.name), label: obj.label, args: obj.args }];
     case 'tool-call-end':
       return [{ type: 'tool-call-end', id: String(obj.id), result: obj.result, error: obj.error }];
+    case 'tool-approval-request':
+      return obj.id && obj.name
+        ? [{ type: 'tool-approval-request', id: String(obj.id), name: String(obj.name), label: obj.label, args: obj.args, message: obj.message }]
+        : [];
     case 'reasoning-delta':
       return typeof obj.text === 'string' ? [{ type: 'reasoning-delta', text: obj.text }] : [];
+    case 'image':
+      return str(obj.url) || str(obj.base64)
+        ? [{ type: 'image', id: str(obj.id), url: str(obj.url), base64: str(obj.base64), mimeType: str(obj.mimeType), alt: str(obj.alt), width: obj.width, height: obj.height }]
+        : [];
     case 'source': {
       const source = toSource(obj.source);
       return source ? [{ type: 'source', source }] : [];
@@ -64,6 +72,13 @@ export const parseOpenAI: StreamParser = (data) => {
   // Responses API: reasoning summaries and web-search citations.
   if ((obj.type === 'response.reasoning_summary_text.delta' || obj.type === 'response.reasoning_text.delta') && typeof obj.delta === 'string') {
     return [{ type: 'reasoning-delta', text: obj.delta }];
+  }
+  // Responses API image generation: progressive previews, then the final image.
+  if (obj.type === 'response.image_generation_call.partial_image' && typeof obj.partial_image_b64 === 'string') {
+    return [{ type: 'image', id: str(obj.item_id), base64: obj.partial_image_b64, mimeType: `image/${obj.output_format ?? 'png'}` }];
+  }
+  if (obj.type === 'response.output_item.done' && obj.item?.type === 'image_generation_call' && typeof obj.item.result === 'string') {
+    return [{ type: 'image', id: str(obj.item.id), base64: obj.item.result, mimeType: `image/${obj.item.output_format ?? 'png'}` }];
   }
   if (obj.type === 'response.output_text.annotation.added') {
     const source = obj.annotation?.type === 'url_citation' ? toSource(obj.annotation) : undefined;
@@ -138,6 +153,10 @@ export const parseAISDK: StreamParser = (data) => {
       return typeof obj.delta === 'string' ? [{ type: 'text-delta', text: obj.delta }] : [];
     case 'reasoning-delta':
       return typeof obj.delta === 'string' && obj.delta ? [{ type: 'reasoning-delta', text: obj.delta }] : [];
+    case 'file':
+      return typeof obj.url === 'string' && String(obj.mediaType ?? '').startsWith('image/')
+        ? [{ type: 'image', url: obj.url, mimeType: obj.mediaType }]
+        : [];
     case 'source-url':
     case 'source-document': {
       const source = toSource({ url: obj.url, title: obj.title, id: obj.sourceId });
@@ -169,9 +188,13 @@ export const parseGemini: StreamParser = (data) => {
   if (!obj || typeof obj !== 'object') return [];
   if (obj.error) return [{ type: 'error', message: String(obj.error.message ?? 'Gemini request failed') }];
   const candidate = obj.candidates?.[0];
-  const parts: { text?: string; thought?: boolean }[] = candidate?.content?.parts ?? [];
+  const parts: { text?: string; thought?: boolean; inlineData?: { mimeType?: string; data?: string } }[] = candidate?.content?.parts ?? [];
   const out: ChatChunk[] = [];
   for (const p of parts) {
+    if (p.inlineData?.data && String(p.inlineData.mimeType ?? '').startsWith('image/')) {
+      out.push({ type: 'image', base64: p.inlineData.data, mimeType: p.inlineData.mimeType });
+      continue;
+    }
     if (typeof p.text !== 'string' || !p.text) continue;
     // With thinkingConfig.includeThoughts, thought summaries arrive as parts marked `thought: true`.
     out.push(p.thought ? { type: 'reasoning-delta', text: p.text } : { type: 'text-delta', text: p.text });

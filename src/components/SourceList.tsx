@@ -53,7 +53,7 @@ export function SourceList({ sources, onSourcePress }: SourceListProps) {
             >
               <View style={styles.top}>
                 <View style={[styles.badge, { backgroundColor: withAlpha(colors.accent, 0.14) }]}>
-                  <Text style={[styles.badgeText, { color: colors.accent }]}>{i + 1}</Text>
+                  <Text maxFontSizeMultiplier={1.3} style={[styles.badgeText, { color: colors.accent }]}>{i + 1}</Text>
                 </View>
                 {domain ? (
                   <Text numberOfLines={1} style={[styles.domain, { color: colors.textMuted }, fontStyle(theme)]}>

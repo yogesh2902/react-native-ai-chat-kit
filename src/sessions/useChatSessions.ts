@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChat, type UseChatOptions, type UseChatResult } from '../useChat';
 import type { ChatMessage } from '../types';
+import { exportChat, messagesContain, type ExportOptions } from './export';
 import { derivePreview, deriveTitle, toMeta, type ChatSession, type ChatSessionMeta, type ChatStore } from './store';
 
 export type UseChatSessionsOptions = UseChatOptions & {
@@ -32,6 +33,12 @@ export type UseChatSessionsResult = UseChatResult & {
   openSession: (id: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
+  /** Pin a chat to the top of the history (or unpin it). */
+  pinSession: (id: string, pinned: boolean) => Promise<void>;
+  /** A saved chat as Markdown (or plain text), ready for Share.share({ message }). */
+  exportSession: (id: string, options?: ExportOptions) => Promise<string>;
+  /** Chats whose title, preview or any message contains `query`, newest first. */
+  searchSessions: (query: string) => Promise<ChatSessionMeta[]>;
   /** Delete every saved chat and start a new one. */
   clearSessions: () => Promise<void>;
   /** Delete chats not updated in `days` days. Returns how many were deleted. */
@@ -73,7 +80,7 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
-  const activeRef = useRef<{ id: string; createdAt: number; title?: string } | null>(null);
+  const activeRef = useRef<{ id: string; createdAt: number; title?: string; pinned?: boolean } | null>(null);
   const lastSavedRef = useRef<ChatMessage[]>(chat.messages);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedModelRef = useRef(chat.model);
@@ -107,6 +114,7 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
       preview: derivePreview(normalized),
       messageCount: normalized.filter((m) => m.role !== 'system').length,
       ...(chatRef.current.model ? { model: chatRef.current.model } : {}),
+      ...(active.pinned ? { pinned: true } : {}),
       messages: normalized,
     };
     upsertMeta(toMeta(session));
@@ -152,7 +160,7 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    activeRef.current = session ? { id: session.id, createdAt: session.createdAt, title: session.title } : null;
+    activeRef.current = session ? { id: session.id, createdAt: session.createdAt, title: session.title, pinned: session.pinned } : null;
     setActiveSessionId(session?.id ?? null);
     const messages = session?.messages ?? [];
     lastSavedRef.current = messages;
@@ -210,6 +218,41 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
     },
     [upsertMeta],
   );
+
+  const pinSession = useCallback(
+    async (id: string, pinned: boolean) => {
+      if (activeRef.current?.id === id) activeRef.current.pinned = pinned;
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, pinned } : s)));
+      const session = await storeRef.current.load(id);
+      if (!session) return;
+      const { pinned: _old, ...rest } = session;
+      await storeRef.current.save(pinned ? { ...rest, pinned: true } : rest);
+    },
+    [],
+  );
+
+  const exportSession = useCallback(async (id: string, exportOptions?: ExportOptions) => {
+    const live = activeRef.current?.id === id ? chatRef.current.messages : undefined;
+    const session = live ? null : await storeRef.current.load(id);
+    const messages = live ?? session?.messages ?? [];
+    const title = activeRef.current?.id === id ? activeRef.current.title ?? deriveTitle(messages) : session?.title;
+    return exportChat(messages, { title, ...exportOptions });
+  }, []);
+
+  const searchSessions = useCallback(async (query: string) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return storeRef.current.list();
+    const out: ChatSessionMeta[] = [];
+    for (const meta of await storeRef.current.list()) {
+      if (meta.title.toLowerCase().includes(q) || meta.preview.toLowerCase().includes(q)) {
+        out.push(meta);
+        continue;
+      }
+      const session = await storeRef.current.load(meta.id);
+      if (session && messagesContain(session.messages, q)) out.push(meta);
+    }
+    return out;
+  }, []);
 
   const deleteSessionsOlderThan = useCallback(
     async (days: number) => {
@@ -281,6 +324,9 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
     openSession,
     deleteSession,
     renameSession,
+    pinSession,
+    exportSession,
+    searchSessions,
     clearSessions,
     deleteSessionsOlderThan,
     refreshSessions,

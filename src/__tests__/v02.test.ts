@@ -119,7 +119,9 @@ describe('useChat v0.2', () => {
     await until(() => !chat.current.isStreaming && chat.current.messages.length === 2, 'edited reply');
 
     expect(texts(chat.current.messages)).toEqual(['user:first, edited', 'assistant:echo:first, edited n=1']);
-    expect(chat.current.messages[0]!.id).not.toBe(firstId);
+    // Same message with a new wording; the original and its replies are kept as a branch.
+    expect(chat.current.messages[0]!.id).toBe(firstId);
+    expect(chat.current.messages[0]!.branches?.[0]?.following).toHaveLength(3);
   });
 
   it('editMessage keeps attachments and ignores non-user messages', async () => {

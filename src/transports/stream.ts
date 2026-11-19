@@ -19,6 +19,10 @@ export function toSimpleMessages(messages: ChatMessage[]): SimpleMessage[] {
     const attachments: SimpleAttachment[] = [];
     for (const part of m.parts) {
       if (part.type === 'text') texts.push(part.text);
+      else if (part.type === 'tool-call' && (part.approval === 'approved' || part.approval === 'denied')) {
+        // Tell the model what the user decided about the tool it asked to run.
+        texts.push(`\n[Tool "${part.name}" was ${part.approval} by the user.]\n`);
+      }
       else if (part.type === 'image') {
         if (part.base64) attachments.push({ mimeType: part.mimeType ?? 'image/jpeg', data: part.base64, ...(part.name ? { name: part.name } : {}) });
         else texts.push('[An image was shared here but is no longer available.]');

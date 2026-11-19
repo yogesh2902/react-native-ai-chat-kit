@@ -30,6 +30,26 @@ export function applyChunk(message: ChatMessage, chunk: ChatChunk, now: number =
       }
       return { ...message, parts };
     }
+    case 'image': {
+      const uri = chunk.url ?? (chunk.base64 ? `data:${chunk.mimeType ?? 'image/png'};base64,${chunk.base64}` : '');
+      if (!uri) return message;
+      const part: MessagePart = {
+        type: 'image',
+        uri,
+        ...(chunk.id ? { id: chunk.id } : {}),
+        ...(chunk.alt ? { alt: chunk.alt } : {}),
+        ...(chunk.mimeType ? { mimeType: chunk.mimeType } : {}),
+        ...(chunk.width && chunk.height ? { width: chunk.width, height: chunk.height } : {}),
+      };
+      const closed = closeReasoning(message.parts, now);
+      const existing = chunk.id ? closed.findIndex((p) => p.type === 'image' && p.id === chunk.id) : -1;
+      if (existing !== -1) {
+        const parts = closed.slice();
+        parts[existing] = part;
+        return { ...message, parts };
+      }
+      return { ...message, parts: [...closed, part] };
+    }
     case 'source': {
       const source = chunk.source;
       if (!source || (!source.url && !source.title)) return message;
@@ -61,6 +81,22 @@ export function applyChunk(message: ChatMessage, chunk: ChatChunk, now: number =
         args: chunk.args,
         state: 'running',
       };
+      return { ...message, parts: [...closed, part] };
+    }
+    case 'tool-approval-request': {
+      const closed = closeReasoning(message.parts, now);
+      const existing = closed.findIndex((p) => p.type === 'tool-call' && p.id === chunk.id);
+      const fields = {
+        state: 'awaiting-approval' as const,
+        approval: 'pending' as const,
+        ...(chunk.message ? { approvalMessage: chunk.message } : {}),
+      };
+      if (existing !== -1) {
+        const parts = closed.slice();
+        parts[existing] = { ...(parts[existing] as Extract<MessagePart, { type: 'tool-call' }>), ...fields };
+        return { ...message, parts };
+      }
+      const part: MessagePart = { type: 'tool-call', id: chunk.id, name: chunk.name, label: chunk.label, args: chunk.args, ...fields };
       return { ...message, parts: [...closed, part] };
     }
     case 'tool-call-end': {

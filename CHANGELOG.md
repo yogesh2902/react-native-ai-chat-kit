@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+Every new feature is optional, with its own switch.
+
+- **Tool approval**: a new `tool-approval-request` stream event pauses the reply on an Approve / Deny card. `respondToTool(id, approved)` records the choice on the tool part and continues the same reply; sending a new message cancels pending approvals. `renderToolCall` gets a `respond` function for custom cards.
+- **Chat tools**: pin, rename and export chats from a long-press sheet in `ChatHistory` (`onPin`, `onRename`, `onExport`); a "Pinned" section; search inside messages (`searchMessages`). New `pinSession`, `exportSession`, `searchSessions` in `useChatSessions` and `exportChat()` for Markdown / plain text.
+- **Edit older messages**: `editAnyMessage` adds Edit to the long-press menu of any user message. Edits keep the original and its replies as a branch (‹ 1/2 ›, `selectBranch`); `keepEditBranches: false` restores replace-only editing.
+- **Tappable citations**: `[1]`, `[2]`… in replies become superscript links to their sources (`linkCitations`).
+- **Math**: `math` renders LaTeX (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`) as readable Unicode with no dependencies, or through your own renderer (`math={{ render }}`).
+- **Generated images**: a new `image` stream event (with progressive previews), parsed from OpenAI image generation, Gemini and AI SDK file parts; markdown images render too. Tap any image for a full-screen viewer with Share (`imageViewer`, `onImagePress`).
+- **Accessibility**: messages announce who is speaking; "Reply ready" / failure announcements; icons capped for very large text; shimmer animations respect Reduce Motion; version and branch switchers are adjustable controls.
+- **Fix (iOS)**: actions in the long-press menu that open a share sheet or another dialog now wait until the menu has closed, so they no longer silently fail.
+- **Tests**: component tests with a React Native stand-in (renders the real components), plus tests for approvals, branches, export, math and images (143 in total).
+- **Docs**: a demo GIF in the README.
+
 ## 0.3.0
 
 Every new feature is optional, with its own prop to turn it on or off.

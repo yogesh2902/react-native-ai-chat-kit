@@ -1,3 +1,5 @@
+import { isInlineMath } from './math';
+
 /**
  * A small, dependency-free markdown parser designed for *streaming* text.
  *
@@ -13,7 +15,8 @@ export type InlineNode =
   | { type: 'text'; text: string }
   | { type: 'strong' | 'em' | 'del'; children: InlineNode[] }
   | { type: 'code'; text: string }
-  | { type: 'link'; href: string; children: InlineNode[] };
+  | { type: 'link'; href: string; children: InlineNode[] }
+  | { type: 'math'; tex: string };
 
 export type ListItem = { text: string; depth: number; checked?: boolean };
 export type TableAlign = 'left' | 'center' | 'right';
@@ -25,7 +28,16 @@ export type Block =
   | { type: 'list'; ordered: boolean; start: number; items: ListItem[]; raw: string }
   | { type: 'blockquote'; text: string; raw: string }
   | { type: 'table'; header: string[]; align: TableAlign[]; rows: string[][]; raw: string }
-  | { type: 'hr'; raw: string };
+  | { type: 'hr'; raw: string }
+  | { type: 'math'; tex: string; closed: boolean; raw: string }
+  | { type: 'image'; src: string; alt: string; raw: string };
+
+export type MarkdownOptions = {
+  /** Parse LaTeX: `$$…$$` / `\[…\]` blocks and `$…$` / `\(…\)` inline. Default false. */
+  math?: boolean;
+};
+
+const IMAGE_LINE = /^\s*!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)\s*$/;
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([\w+#.-]*)/;
 const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
@@ -66,7 +78,7 @@ function isBlockStart(line: string, next: string | undefined): boolean {
   );
 }
 
-export function parseBlocks(source: string): Block[] {
+export function parseBlocks(source: string, options: MarkdownOptions = {}): Block[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n');
   const blocks: Block[] = [];
   let i = 0;
@@ -75,6 +87,47 @@ export function parseBlocks(source: string): Block[] {
     const line = lines[i]!;
 
     if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    // Display math: $$ … $$ or \[ … \] (possibly still open while streaming)
+    if (options.math) {
+      const trimmed = line.trim();
+      const open = trimmed.startsWith('$$') ? '$$' : trimmed.startsWith('\\[') ? '\\[' : null;
+      if (open) {
+        const close = open === '$$' ? '$$' : '\\]';
+        const start = i;
+        const rest = trimmed.slice(2);
+        const sameLine = rest.indexOf(close);
+        if (sameLine !== -1) {
+          blocks.push({ type: 'math', tex: rest.slice(0, sameLine).trim(), closed: true, raw: line });
+          i++;
+          continue;
+        }
+        const body = [rest];
+        let closed = false;
+        i++;
+        while (i < lines.length) {
+          const l = lines[i]!;
+          const at = l.indexOf(close);
+          i++;
+          if (at !== -1) {
+            body.push(l.slice(0, at));
+            closed = true;
+            break;
+          }
+          body.push(l);
+        }
+        blocks.push({ type: 'math', tex: body.join('\n').trim(), closed, raw: lines.slice(start, i).join('\n') });
+        continue;
+      }
+    }
+
+    // An image on its own line: ![alt](url)
+    const image = line.match(IMAGE_LINE);
+    if (image) {
+      blocks.push({ type: 'image', alt: image[1]!, src: image[2]!, raw: line });
       i++;
       continue;
     }
@@ -206,7 +259,7 @@ export function parseBlocks(source: string): Block[] {
 const isWordChar = (c: string | undefined) => !!c && /[A-Za-z0-9À-￿]/.test(c);
 
 /** Parse inline markdown. With `partial`, unclosed markers style the remainder. */
-export function parseInline(src: string, partial = false): InlineNode[] {
+export function parseInline(src: string, partial = false, options: MarkdownOptions = {}): InlineNode[] {
   const out: InlineNode[] = [];
   let text = '';
   const pushText = () => {
@@ -217,6 +270,30 @@ export function parseInline(src: string, partial = false): InlineNode[] {
   let i = 0;
   while (i < src.length) {
     const c = src[i]!;
+
+    // Inline math: \( … \), $$ … $$ inside a sentence, or $ … $ (not money like "$5 and $10")
+    if (options.math && src.startsWith('$$', i)) {
+      const end = src.indexOf('$$', i + 2);
+      if (end !== -1) {
+        pushText();
+        out.push({ type: 'math', tex: src.slice(i + 2, end) });
+        i = end + 2;
+        continue;
+      }
+      if (partial) break; // still streaming
+    }
+    if (options.math && (src.startsWith('\\(', i) || (c === '$' && src[i + 1] !== '$' && !isWordChar(src[i - 1])))) {
+      const paren = c === '\\';
+      const end = paren ? src.indexOf('\\)', i + 2) : src.indexOf('$', i + 1);
+      const body = end === -1 ? '' : src.slice(i + (paren ? 2 : 1), end);
+      if (end !== -1 && (paren || (isInlineMath(body) && !/\d/.test(src[end + 1] ?? '')))) {
+        pushText();
+        out.push({ type: 'math', tex: body });
+        i = end + (paren ? 2 : 1);
+        continue;
+      }
+      if (end === -1 && partial && paren) break; // still streaming: hide until it closes
+    }
 
     if (c === '\\' && i + 1 < src.length && /[\\`*_~\[\]()#|>-]/.test(src[i + 1]!)) {
       text += src[i + 1];
@@ -245,13 +322,13 @@ export function parseInline(src: string, partial = false): InlineNode[] {
       const end = src.indexOf(two, i + 2);
       if (leftOk && end !== -1 && end > i + 2) {
         pushText();
-        out.push({ type: two === '~~' ? 'del' : 'strong', children: parseInline(src.slice(i + 2, end), partial) });
+        out.push({ type: two === '~~' ? 'del' : 'strong', children: parseInline(src.slice(i + 2, end), partial, options) });
         i = end + 2;
         continue;
       }
       if (leftOk && end === -1 && partial && i + 2 < src.length) {
         pushText();
-        out.push({ type: two === '~~' ? 'del' : 'strong', children: parseInline(src.slice(i + 2), partial) });
+        out.push({ type: two === '~~' ? 'del' : 'strong', children: parseInline(src.slice(i + 2), partial, options) });
         break;
       }
       if (leftOk && end === -1 && partial && i + 2 >= src.length) {
@@ -271,7 +348,7 @@ export function parseInline(src: string, partial = false): InlineNode[] {
         }
         if (end !== -1) {
           pushText();
-          out.push({ type: 'em', children: parseInline(src.slice(i + 1, end), partial) });
+          out.push({ type: 'em', children: parseInline(src.slice(i + 1, end), partial, options) });
           i = end + 1;
           continue;
         }
@@ -285,14 +362,14 @@ export function parseInline(src: string, partial = false): InlineNode[] {
         const label = src.slice(i + 1, close);
         if (end !== -1) {
           pushText();
-          out.push({ type: 'link', href: src.slice(close + 2, end).trim(), children: parseInline(label, partial) });
+          out.push({ type: 'link', href: src.slice(close + 2, end).trim(), children: parseInline(label, partial, options) });
           i = end + 1;
           continue;
         }
         if (partial) {
           // URL still streaming: show the label as plain text for now
           pushText();
-          out.push(...parseInline(label, partial));
+          out.push(...parseInline(label, partial, options));
           break;
         }
       }

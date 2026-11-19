@@ -164,10 +164,10 @@ const welcome: WelcomeConfig = {
   logo: <DemoLogo />,
   subtitle: 'Try a card below, or type anything. This demo runs without an API key.',
   cards: [
-    { icon: '✈️', title: 'Plan a trip', description: 'Flights and ideas for Goa', prompt: 'Plan a trip to Goa' },
-    { icon: '💻', title: 'Setup code', description: 'Add the kit to an app', prompt: 'Show me the setup code' },
+    { icon: '✈️', title: 'Plan a trip', description: 'Flights, then hold a seat', prompt: 'Plan a trip to Goa' },
     { icon: '🔎', title: 'Search the web', description: 'An answer with sources', prompt: 'Search the latest React Native news' },
-    { icon: '🖼', title: 'Send a photo', description: 'Tap ＋ below to attach one', prompt: 'How do I attach a photo?' },
+    { icon: '🎨', title: 'Draw an image', description: 'A generated picture', prompt: 'Draw a sunset over a Goa beach' },
+    { icon: '🧮', title: 'Explain a formula', description: 'Math, rendered', prompt: 'Explain the quadratic formula' },
   ],
 };
 
@@ -269,6 +269,8 @@ function Demo() {
         messageActions={messageActions}
         allowDelete
         allowReply
+        editAnyMessage
+        math
         models={MODELS}
         codeBlocks={{ lineNumbers: true, theme: 'auto' }}
         haptics={haptics}
@@ -350,6 +352,12 @@ function Demo() {
             void chat.openSession(id);
           }}
           onDelete={(id) => void chat.deleteSession(id)}
+          onPin={(id, pinned) => void chat.pinSession(id, pinned)}
+          onRename={(id, title) => void chat.renameSession(id, title)}
+          onExport={async (id) => {
+            await Share.share({ message: await chat.exportSession(id) });
+          }}
+          searchMessages={chat.searchSessions}
           onClearAll={() => void chat.clearSessions()}
           onNewChat={() => {
             chat.newSession();

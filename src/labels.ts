@@ -51,6 +51,12 @@ export type ChatLabels = {
   offline: string;
   reconnecting: string;
 
+  // Screen readers
+  youSaid: string;
+  assistantSaid: string;
+  replyReady: string;
+  replyFailed: string;
+
   // Reasoning, sources, versions
   thoughtFor: (seconds: number) => string;
   showReasoning: string;
@@ -60,6 +66,9 @@ export type ChatLabels = {
   previousVersion: string;
   nextVersion: string;
   versionOf: (current: number, total: number) => string;
+  previousEdit: string;
+  nextEdit: string;
+  editOf: (current: number, total: number) => string;
   regenerate: string;
 
   // Quote reply
@@ -67,6 +76,12 @@ export type ChatLabels = {
   replyingTo: (role: 'user' | 'assistant' | 'system') => string;
   cancelReply: string;
   quotedMessage: string;
+
+  // Images
+  image: string;
+  closeImage: string;
+  shareImage: string;
+  openImage: (alt: string) => string;
 
   // Model picker
   chooseModel: string;
@@ -76,8 +91,20 @@ export type ChatLabels = {
   toolRunning: string;
   toolDone: string;
   toolFailed: string;
+  needsApproval: string;
+  approve: string;
+  deny: string;
+  toolDenied: string;
 
   // History
+  pinned: string;
+  pin: string;
+  unpin: string;
+  rename: string;
+  renameChat: string;
+  save: string;
+  exportChat: string;
+  chatActions: (title: string) => string;
   chats: string;
   newChat: string;
   searchChats: string;
@@ -90,6 +117,7 @@ export type ChatLabels = {
   deleteChat: (title: string) => string;
   cancel: string;
   longPressToDelete: string;
+  longPressForActions: string;
   closeHistory: string;
   today: string;
   yesterday: string;
@@ -144,6 +172,11 @@ export const defaultLabels: ChatLabels = {
   offline: "You're offline. Messages will send when you're back online.",
   reconnecting: 'Back online. Retrying…',
 
+  youSaid: 'You said',
+  assistantSaid: 'Assistant said',
+  replyReady: 'Reply ready',
+  replyFailed: 'The reply failed',
+
   thoughtFor: (seconds) => (seconds < 1 ? 'Thought for a moment' : `Thought for ${seconds}s`),
   showReasoning: 'Show reasoning',
   hideReasoning: 'Hide reasoning',
@@ -152,6 +185,9 @@ export const defaultLabels: ChatLabels = {
   previousVersion: 'Previous answer',
   nextVersion: 'Next answer',
   versionOf: (current, total) => `Answer ${current} of ${total}`,
+  previousEdit: 'Previous version of this message',
+  nextEdit: 'Next version of this message',
+  editOf: (current, total) => `Message version ${current} of ${total}`,
   regenerate: 'Regenerate',
 
   reply: 'Reply',
@@ -159,13 +195,30 @@ export const defaultLabels: ChatLabels = {
   cancelReply: 'Cancel reply',
   quotedMessage: 'Quoted message. Tap to show it.',
 
+  image: 'Image',
+  closeImage: 'Close image',
+  shareImage: 'Share image',
+  openImage: (alt) => `${alt}. Tap to view full screen`,
+
   chooseModel: 'Choose model',
   currentModel: (name) => `Model: ${name}`,
 
   toolRunning: 'Working…',
   toolDone: 'Done',
   toolFailed: 'Failed',
+  needsApproval: 'Needs your approval',
+  approve: 'Approve',
+  deny: 'Deny',
+  toolDenied: 'Not approved',
 
+  pinned: 'Pinned',
+  pin: 'Pin',
+  unpin: 'Unpin',
+  rename: 'Rename',
+  renameChat: 'Rename chat',
+  save: 'Save',
+  exportChat: 'Export / share',
+  chatActions: (title) => `Actions for ${title}`,
   chats: 'Chats',
   newChat: '＋ New chat',
   searchChats: 'Search chats',
@@ -178,6 +231,7 @@ export const defaultLabels: ChatLabels = {
   deleteChat: (title) => `Delete ${title}`,
   cancel: 'Cancel',
   longPressToDelete: 'Long press to delete',
+  longPressForActions: 'Long press for pin, rename, export and delete',
   closeHistory: 'Close history',
   today: 'Today',
   yesterday: 'Yesterday',
