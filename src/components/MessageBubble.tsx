@@ -8,7 +8,7 @@ import type { ChatFeedbackHandler, ChatLayout, ChatStyles, MessageAction, Messag
 import { FadeIn, usePressScale } from './animations';
 import { ReasoningBlock } from './ReasoningBlock';
 import { SourceList } from './SourceList';
-import type { ChatSource } from '../types';
+import type { ChatSource, FilePart } from '../types';
 import { ToolCallCard } from './ToolCallCard';
 import { TypingIndicator } from './TypingIndicator';
 
@@ -62,6 +62,8 @@ export type MessageBubbleProps = MessageRenderers & {
   modelName?: string;
   /** Turn [1], [2]… in replies into tappable links to their sources. Default true. */
   linkCitations?: boolean;
+  /** Tapping a file chip (opens the document preview in ChatView). */
+  onFilePress?: (file: FilePart) => void;
   /** Tapping an image (opens the full-screen viewer in ChatView). */
   onImagePress?: (uri: string, alt?: string) => void;
   /** Shows ‹ 1/2 › under edited user messages to switch between wordings. */
@@ -115,6 +117,7 @@ function MessageBubbleImpl({
   linkCitations = true,
   onSelectBranch,
   onImagePress,
+  onFilePress,
 }: MessageBubbleProps) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -187,7 +190,22 @@ function MessageBubbleImpl({
               </Text>
             </Pressable>
           ) : null}
+          {isUser && message.command ? (
+            <View style={styles.commandLine}>
+              <View style={[styles.commandChip, { backgroundColor: withAlpha(theme.colors.userText, 0.1) }]}>
+                <Text style={[{ color, fontSize: theme.fontSize * 0.82, fontFamily: theme.monoFont }, fontStyle(theme, 'bold')]}>
+                  /{message.command.name}
+                </Text>
+              </View>
+              {message.command.input ? (
+                <Text selectable={selectable} style={[{ color, fontSize: theme.fontSize, lineHeight: theme.lineHeight }, fontStyle(theme), custom.userText]}>
+                  {message.command.input}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
           {message.parts.map((part, i) => {
+            if (part.type === 'text' && isUser && message.command) return null; // shown as the command above
             if (part.type === 'reasoning') {
               if (reasoning === false || isUser || !part.text.trim()) return null;
               const thinking = streaming && i === message.parts.length - 1 && part.durationMs === undefined;
@@ -271,8 +289,8 @@ function MessageBubbleImpl({
               );
             }
             if (part.type === 'file') {
-              return (
-                <View key={i} style={[styles.fileChip, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
+              const chip = (
+                <View style={[styles.fileChip, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
                   <Text style={styles.fileIcon}>📄</Text>
                   <View style={styles.fileText}>
                     <Text numberOfLines={1} style={[{ color: theme.colors.text, fontSize: 13 }, fontStyle(theme, 'bold')]}>
@@ -285,6 +303,20 @@ function MessageBubbleImpl({
                     </Text>
                   </View>
                 </View>
+              );
+              return onFilePress ? (
+                <Pressable
+                  key={i}
+                  accessibilityRole="button"
+                  accessibilityLabel={labels.openDocument(part.name)}
+                  onPress={() => onFilePress(part)}
+                  onLongPress={onLongPress ? () => onLongPress(message) : undefined}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+                >
+                  {chip}
+                </Pressable>
+              ) : (
+                <React.Fragment key={i}>{chip}</React.Fragment>
               );
             }
             return null;
@@ -306,6 +338,12 @@ function MessageBubbleImpl({
         </Pressable>
 
         {!isUser && showSources && message.sources?.length ? <SourceList sources={message.sources} onSourcePress={onSourcePress} /> : null}
+
+        {message.status === 'queued' ? (
+          <Text accessibilityLiveRegion="polite" style={[styles.timestamp, { color: theme.colors.textMuted }, fontStyle(theme)]}>
+            🕒 {labels.queued}
+          </Text>
+        ) : null}
 
         {timestamp || (!isUser && modelName && !streaming) ? (
           <Text style={[styles.timestamp, { color: theme.colors.textMuted }, fontStyle(theme)]}>
@@ -671,6 +709,8 @@ const styles = StyleSheet.create({
   versionArrow: { width: 22, height: 32, alignItems: 'center', justifyContent: 'center' },
   versionGlyph: { fontSize: 20, fontWeight: '600', marginTop: -2 },
   versionText: { fontSize: 12, minWidth: 26, textAlign: 'center' },
+  commandLine: { gap: 4 },
+  commandChip: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   srOnly: { position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' },
   quote: { borderLeftWidth: 3, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 6 },
   replyIcon: { position: 'absolute', top: '50%', marginTop: -16, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },

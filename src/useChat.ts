@@ -39,6 +39,10 @@ export type SendOptions = {
   attachments?: ChatAttachment[];
   /** Quote an earlier message in this one (quote reply). Pass the message or a ReplyReference. */
   replyTo?: ChatMessage | ReplyReference;
+  /** Sent through a slash command: shown as `/name input`, while `text` (the full prompt) goes to the model. */
+  command?: { name: string; input: string };
+  /** Offline: add the message as 'queued' without asking for a reply yet. `flushQueue()` sends it later. */
+  queue?: boolean;
 };
 
 export type UseChatResult = {
@@ -57,9 +61,11 @@ export type UseChatResult = {
    * Replace a user message with new text and get a fresh reply. Everything
    * after that message is dropped (like editing in ChatGPT); its attachments are kept.
    */
-  editMessage: (id: string, text: string) => void;
+  editMessage: (id: string, text: string, options?: { command?: { name: string; input: string } }) => void;
   /** Remove one message. Deleting the reply that is streaming stops it first. */
   deleteMessage: (id: string) => void;
+  /** Send messages that were queued while offline, oldest first (one reply at a time). */
+  flushQueue: () => void;
   /** Get a new answer to the last question. The old one is kept as a version unless `keepReplyVersions` is false. */
   regenerate: () => void;
   /** Show another version of a reply (0-based index into all its versions). */
@@ -129,7 +135,13 @@ function expirePendingApprovals(list: ChatMessage[]): ChatMessage[] {
 export function allBranches(m: ChatMessage, following: ChatMessage[]): MessageBranch[] {
   const others = m.branches ?? [];
   const at = Math.min(Math.max(m.branchIndex ?? others.length, 0), others.length);
-  const current: MessageBranch = { parts: m.parts, createdAt: m.createdAt, ...(m.replyTo ? { replyTo: m.replyTo } : {}), following };
+  const current: MessageBranch = {
+    parts: m.parts,
+    createdAt: m.createdAt,
+    ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+    ...(m.command ? { command: m.command } : {}),
+    following,
+  };
   return [...others.slice(0, at), current, ...others.slice(at)];
 }
 
@@ -258,7 +270,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
       const trimmed = text.trim();
       const attachments = sendOptions?.attachments ?? [];
       if (!trimmed && attachments.length === 0) return;
-      if (controllerRef.current) return; // one response at a time
+      if (controllerRef.current && !sendOptions?.queue) return; // one response at a time
 
       const makeId = optionsRef.current.generateId ?? defaultId;
       const parts: MessagePart[] = attachments.map((a): MessagePart =>
@@ -275,9 +287,15 @@ export function useChat(options: UseChatOptions): UseChatResult {
         role: 'user',
         parts,
         createdAt: Date.now(),
-        status: 'done',
+        status: sendOptions?.queue ? 'queued' : 'done',
         ...(replyTo ? { replyTo } : {}),
+        ...(sendOptions?.command ? { command: sendOptions.command } : {}),
       };
+      if (sendOptions?.queue) {
+        // Offline: keep it in the chat, waiting; flushQueue() asks for the reply later.
+        commit([...messagesRef.current, userMessage]);
+        return;
+      }
       const assistant = newAssistant(makeId());
       // A new question replaces any approval still waiting for an answer.
       const history = [...expirePendingApprovals(messagesRef.current), userMessage];
@@ -337,6 +355,20 @@ export function useChat(options: UseChatOptions): UseChatResult {
     [updateMessage],
   );
 
+  const flushQueue = useCallback(() => {
+    if (controllerRef.current) return;
+    const list = messagesRef.current;
+    const index = list.findIndex((m) => m.role === 'user' && m.status === 'queued');
+    if (index === -1) return;
+    const makeId = optionsRef.current.generateId ?? defaultId;
+    const sent: ChatMessage = { ...list[index]!, status: 'done' };
+    const history = [...list.slice(0, index), sent];
+    const assistant = newAssistant(makeId());
+    // Later queued messages stay after this reply and are sent next.
+    commit([...history, assistant, ...list.slice(index + 1)]);
+    void run(history, assistant.id);
+  }, [commit, run]);
+
   const selectBranch = useCallback(
     (id: string, index: number) => {
       if (controllerRef.current) return;
@@ -348,12 +380,13 @@ export function useChat(options: UseChatOptions): UseChatResult {
       const current = message.branchIndex ?? message.branches.length;
       const target = all[index];
       if (!target || index === current) return;
-      const { replyTo: _r, ...base } = message;
+      const { replyTo: _r, command: _c, ...base } = message;
       const switched: ChatMessage = {
         ...base,
         parts: target.parts,
         createdAt: target.createdAt,
         ...(target.replyTo ? { replyTo: target.replyTo } : {}),
+        ...(target.command ? { command: target.command } : {}),
         branches: all.filter((_, i) => i !== index),
         branchIndex: index,
       };
@@ -414,7 +447,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
   );
 
   const editMessage = useCallback(
-    (id: string, text: string) => {
+    (id: string, text: string, editOptions?: { command?: { name: string; input: string } }) => {
       const trimmed = text.trim();
       if (controllerRef.current) return; // wait for the current reply to finish or be stopped
       const list = messagesRef.current;
@@ -427,10 +460,12 @@ export function useChat(options: UseChatOptions): UseChatResult {
       const makeId = optionsRef.current.generateId ?? defaultId;
       const parts: MessagePart[] = trimmed ? [...keptParts, { type: 'text', text: trimmed }] : keptParts;
       const branches = optionsRef.current.keepEditBranches === false ? undefined : allBranches(original, list.slice(index + 1));
+      const { command: _oldCommand, ...rest } = original;
+      const base = editOptions?.command ? { ...rest, command: editOptions.command } : rest;
       const edited: ChatMessage = branches
         ? // Same message, new wording; the old one and its replies stay as a branch.
-          { ...original, parts, createdAt: Date.now(), branches, branchIndex: branches.length }
-        : { ...original, id: makeId(), parts, createdAt: Date.now() };
+          { ...base, parts, createdAt: Date.now(), status: 'done', branches, branchIndex: branches.length }
+        : { ...base, id: makeId(), parts, createdAt: Date.now(), status: 'done' };
       const history = [...list.slice(0, index), edited];
       const assistant = newAssistant(makeId());
       commit([...history, assistant]);
@@ -483,6 +518,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
     regenerate: retry,
     selectVersion,
     selectBranch,
+    flushQueue,
     model,
     setModel,
     respondToTool,

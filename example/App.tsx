@@ -3,7 +3,9 @@ import NetInfo from '@react-native-community/netinfo';
 import * as Audio from 'expo-audio';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
+import * as Sharing from 'expo-sharing';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Speech from 'expo-speech';
@@ -11,10 +13,12 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, BackHandler, Easing, Platform, Pressable, Share, StyleSheet, Text, useColorScheme, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebView } from 'react-native-webview';
 import {
   ChatHistory,
   ChatView,
   createExpoAttachmentPickers,
+  createExpoDocumentViewer,
   createExpoHaptics,
   createExpoSounds,
   createExpoSpeech,
@@ -23,6 +27,7 @@ import {
   createNetInfoMonitor,
   createWebNetworkMonitor,
   createWebSpeechRecognizer,
+  defaultCommands,
   getMessageText,
   isWebSpeechRecognitionAvailable,
   createStreamTransport,
@@ -33,6 +38,7 @@ import {
   PALETTE_NAMES,
   applyPalette,
   type ChatLabelsOverrides,
+  type ChatCommand,
   type ChatModelOption,
   type ChatPalette,
   type ChatLayout,
@@ -187,6 +193,9 @@ const MODELS: ChatModelOption[] = [
 const haptics = Platform.OS === 'web' ? undefined : createExpoHaptics(Haptics);
 const sounds = Platform.OS === 'web' ? undefined : createExpoSounds(Audio, { volume: 0.6 });
 
+// Tap a file in a message to preview it: PDFs show in a WebView (iOS), "Open in…" uses the share sheet.
+const documentViewer = createExpoDocumentViewer({ WebView, Sharing, FileSystem });
+
 // Offline banner + auto-retry when the connection comes back.
 const network = Platform.OS === 'web' ? createWebNetworkMonitor() : createNetInfoMonitor(NetInfo);
 
@@ -249,6 +258,12 @@ function Demo() {
     [],
   );
   const chat = useChatSessions({ transport, store, restoreLastSession: true, maxAgeDays: 30, model: MODELS[0]!.id });
+  // Slash commands: type "/" in the composer. Prompt commands are expanded before sending;
+  // onRun commands run app code instead.
+  const commands = useMemo<ChatCommand[]>(
+    () => [...defaultCommands, { name: 'new', icon: '🆕', description: 'Start a new chat', onRun: () => chat.newSession() }],
+    [chat.newSession],
+  );
   const activeTitle = chat.sessions.find((s) => s.id === chat.activeSessionId)?.title ?? 'New chat';
 
   return (
@@ -271,6 +286,9 @@ function Demo() {
         allowReply
         editAnyMessage
         math
+        commands={commands}
+        voiceMode
+        documentViewer={documentViewer}
         models={MODELS}
         codeBlocks={{ lineNumbers: true, theme: 'auto' }}
         haptics={haptics}

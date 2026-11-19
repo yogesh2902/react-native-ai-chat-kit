@@ -41,6 +41,7 @@ export {
   createExpoSpeechRecognizer,
   createExpoHaptics,
   createExpoSounds,
+  createExpoDocumentViewer,
   defaultChatSounds,
   optimizeImage,
   base64ToUtf8,
@@ -56,6 +57,12 @@ export { SourceList, sourceDomain } from './components/SourceList';
 export type { SourceListProps } from './components/SourceList';
 export { ModelPicker } from './components/ModelPicker';
 export { ImageViewer } from './components/ImageViewer';
+export { DocumentViewer } from './components/DocumentViewer';
+export type { DocumentViewerProps, DocumentViewerAdapter } from './components/DocumentViewer';
+export { VoiceMode } from './components/VoiceMode';
+export type { VoiceModeProps, VoiceModeState } from './components/VoiceMode';
+export { defaultCommands, matchCommand, expandCommand, suggestCommands } from './commands';
+export type { ChatCommand, CommandReference } from './commands';
 export type { ImageViewerProps } from './components/ImageViewer';
 export type { ModelPickerProps, ChatModelOption } from './components/ModelPicker';
 export { MessageMenu } from './components/MessageMenu';

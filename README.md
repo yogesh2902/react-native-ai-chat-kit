@@ -66,6 +66,10 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - ✏️ **Edit any message**: the original stays as a branch you can flip back to (‹ 1/2 ›).
 - 📐 **Math** (LaTeX → readable Unicode, or plug in your own renderer) and 🖼️ **AI-generated images** with a full-screen viewer.
 - ♿ **Accessible**: screen readers hear who's speaking and when a reply is ready; respects Reduce Motion and large text.
+- ⚡ **Slash commands**: type `/summarize`, `/translate Hindi …` or your own commands, suggested as you type.
+- 📴 **Offline queue**: messages written offline wait in the chat and send automatically when you're back.
+- 📄 **Document preview**: tap a file to read it in the app (text, Markdown, code, CSV, PDF).
+- 🎙️ **Voice conversation mode**: talk hands-free; answers are read aloud, then it listens again.
 - 📊 Tables, lists, task lists, quotes, headings, links.
 - ⏹️ **Stop & Retry**, error states, "scroll to latest" button.
 - 💬 **Starter suggestions** for empty chats, and **follow-up chips** under replies.
@@ -413,6 +417,32 @@ Every feature here is optional too.
 
 **Accessibility:** screen readers hear "You said / Assistant said" before each message and get "Reply ready" when an answer finishes; icons don't clip at large text sizes; shimmer animations stop with Reduce Motion; and the ‹ › switchers work as adjustable controls (swipe up/down).
 
+### Slash commands, offline queue, document preview and voice mode
+
+```tsx
+import { defaultCommands, createExpoDocumentViewer } from 'react-native-ai-chat-kit';
+import { WebView } from 'react-native-webview';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
+
+<ChatView
+  {...chat} // flushQueue comes from useChat / useChatSessions
+  commands={[...defaultCommands, { name: 'new', icon: '🆕', description: 'New chat', onRun: () => chat.newSession() }]}
+  network={createNetInfoMonitor(NetInfo)} // offlineQueue is on by default when a monitor is passed
+  documentViewer={createExpoDocumentViewer({ WebView, Sharing, FileSystem })}
+  voice={recognizer}
+  speech={createExpoSpeech(Speech)}
+  voiceMode // adds a voice-conversation button next to the mic
+/>
+```
+
+| Feature | Turn on / off | Notes |
+| --- | --- | --- |
+| **Slash commands** | `commands` | Typing `/` lists them. A command's `prompt` is sent to the model (`{input}` = what was typed after it); `onRun` runs app code instead. The bubble shows `/summarize notes`, not the long prompt. `defaultCommands`: summarize, translate, explain, fix, shorter. |
+| **Offline queue** | `offlineQueue` (default `true`, needs `network`) | Messages sent offline show "🕒 Waiting for connection" and go out in order, one reply each, when the device is back online. Saved chats keep their queue. |
+| **Document preview** | `documentPreview` (default `true`), `documentViewer`, `onFilePress` | Tap a file chip. Text, Markdown, code, CSV and JSON render in the app with no extra packages. PDFs render inside the app on iOS and web via `createExpoDocumentViewer`; Android offers "Open in…" (your PDF app). |
+| **Voice conversation** | `voiceMode` (default `false`, needs `voice` + `speech`) | Listens, sends when you stop talking, reads the answer aloud, then listens again. Tap the orb to send early or interrupt; ✕ ends it. The conversation is saved like any other. |
+
 ## Chat history (previous conversations)
 
 Swap `useChat` for `useChatSessions` and every conversation is saved automatically. Users can reopen any past chat and keep talking: new replies get that chat's full history as context.
@@ -463,9 +493,9 @@ function Assistant() {
 | `keepReplyVersions` | `boolean` | Keep earlier answers when regenerating (default `true`). |
 | `keepEditBranches` | `boolean` | Keep the original when a message is edited, as a branch (default `true`). |
 
-Returns `{ messages, status, isStreaming, error, send, stop, retry, regenerate, selectVersion, selectBranch, respondToTool, clear, setMessages, rateMessage, editMessage, deleteMessage, model, setModel }`.
+Returns `{ messages, status, isStreaming, error, send, stop, retry, regenerate, selectVersion, selectBranch, respondToTool, flushQueue, clear, setMessages, rateMessage, editMessage, deleteMessage, model, setModel }`.
 
-`send(text, { attachments, replyTo })` also takes attachments from the pickers (see *Images, documents and voice*) and a message to quote.
+`send(text, { attachments, replyTo, command, queue })` also takes attachments from the pickers (see *Images, documents and voice*) and a message to quote.
 
 ### `<ChatView />`
 
@@ -500,6 +530,10 @@ Spread `useChat()` into it, plus:
 | `respondToTool`, `onToolDecision` | Approve / Deny cards for tools that need the user's OK |
 | `editAnyMessage`, `selectBranch` | Edit older messages; ‹ 1/2 › between edited versions |
 | `linkCitations`, `math`, `imageViewer`, `onImagePress` | Tappable citations, LaTeX math, image viewer |
+| `commands` | Slash commands (`defaultCommands` or your own) |
+| `offlineQueue`, `flushQueue` | Queue messages while offline (with `network`) |
+| `documentPreview`, `documentViewer`, `onFilePress` | Tap files to preview them |
+| `voiceMode` | Hands-free voice conversation (with `voice` + `speech`) |
 | `renderMessage` | Render messages yourself |
 | `bottomInset`, `keyboardVerticalOffset` | Safe-area and header offsets |
 

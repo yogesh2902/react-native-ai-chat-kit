@@ -26,6 +26,14 @@ export type ChatLabels = {
   voiceFailed: string;
   editing: string;
   cancelEdit: string;
+  commands: string;
+  voiceMode: string;
+  speaking: string;
+  voicePaused: string;
+  tapToTalk: string;
+  tapToSend: string;
+  tapToInterrupt: string;
+  endVoice: string;
 
   // Chat
   emptyTitle: string;
@@ -49,6 +57,8 @@ export type ChatLabels = {
   deleteMessage: string;
   closeMenu: string;
   offline: string;
+  offlineQueued: (count: number) => string;
+  queued: string;
   reconnecting: string;
 
   // Screen readers
@@ -82,6 +92,12 @@ export type ChatLabels = {
   closeImage: string;
   shareImage: string;
   openImage: (alt: string) => string;
+
+  // Documents
+  openDocument: (name: string) => string;
+  closeDocument: string;
+  openIn: string;
+  noPreview: string;
 
   // Model picker
   chooseModel: string;
@@ -149,6 +165,14 @@ export const defaultLabels: ChatLabels = {
   voiceFailed: 'Voice input failed.',
   editing: 'Editing message',
   cancelEdit: 'Cancel',
+  commands: 'Commands',
+  voiceMode: 'Voice conversation',
+  speaking: 'Speaking…',
+  voicePaused: 'Paused',
+  tapToTalk: 'Tap the circle to talk',
+  tapToSend: 'Tap to send now',
+  tapToInterrupt: 'Tap to interrupt',
+  endVoice: 'End voice conversation',
 
   emptyTitle: 'How can I help?',
   scrollToLatest: 'Scroll to latest message',
@@ -170,6 +194,8 @@ export const defaultLabels: ChatLabels = {
   deleteMessage: 'Delete message',
   closeMenu: 'Close menu',
   offline: "You're offline. Messages will send when you're back online.",
+  offlineQueued: (count) => `You're offline. ${count === 1 ? 'Your message' : `${count} messages`} will send when you're back online.`,
+  queued: 'Waiting for connection',
   reconnecting: 'Back online. Retrying…',
 
   youSaid: 'You said',
@@ -199,6 +225,11 @@ export const defaultLabels: ChatLabels = {
   closeImage: 'Close image',
   shareImage: 'Share image',
   openImage: (alt) => `${alt}. Tap to view full screen`,
+
+  openDocument: (name) => `${name}. Tap to preview`,
+  closeDocument: 'Close document',
+  openIn: 'Open in…',
+  noPreview: "This file can't be previewed here. Use Open in… to view it in another app.",
 
   chooseModel: 'Choose model',
   currentModel: (name) => `Model: ${name}`,

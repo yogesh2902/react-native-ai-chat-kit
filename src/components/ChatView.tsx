@@ -19,10 +19,13 @@ import { ChatLabelsContext, mergeLabels, useChatLabels, type ChatLabelsOverrides
 import { fontStyle, useChatTheme } from '../theme';
 import { toSpeakableText } from '../markdown/plainText';
 import { isNetworkError } from '../adapters/network';
-import { getMessageText, type ChatAttachment, type ChatMessage, type ChatSource, type ReplyReference } from '../types';
-import { toReplyReference } from '../useChat';
+import { getMessageText, type ChatAttachment, type ChatMessage, type ChatSource, type FilePart, type ReplyReference } from '../types';
+import { toReplyReference, type SendOptions } from '../useChat';
+import { expandCommand, matchCommand, type ChatCommand } from '../commands';
 import { CodeBlockOptionsContext, MarkdownFeaturesContext, type CodeBlockOptions, type MarkdownFeatures, type MathOptions } from '../markdown/StreamingMarkdown';
 import { ImageViewer } from './ImageViewer';
+import { DocumentViewer, type DocumentViewerAdapter } from './DocumentViewer';
+import { VoiceMode } from './VoiceMode';
 import { ModelPicker, type ChatModelOption } from './ModelPicker';
 import { resolveCodeBlocks, resolveReasoning } from './featureSwitches';
 import { buildListItems, formatMessageTime, type ChatListItem } from './chatListItems';
@@ -52,7 +55,7 @@ import { useKeyboardInset } from './useKeyboardInset';
 export type ChatViewProps = ThemeProps & MessageRenderers & {
   messages: ChatMessage[];
   /** `send` from useChat. */
-  send: (text: string, options?: { attachments?: ChatAttachment[]; replyTo?: ReplyReference }) => void;
+  send: (text: string, options?: SendOptions) => void;
   stop?: () => void;
   retry?: () => void;
   isStreaming?: boolean;
@@ -95,7 +98,7 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   /** `rateMessage` from useChat (spread in automatically). */
   rateMessage?: (id: string, rating: 'up' | 'down' | null) => void;
   /** `editMessage` from useChat. When present, the latest user message gets an Edit action. Set `allowEdit={false}` to hide it. */
-  editMessage?: (id: string, text: string) => void;
+  editMessage?: (id: string, text: string, options?: { command?: { name: string; input: string } }) => void;
   allowEdit?: boolean;
   /** Also edit older messages (long-press → Edit). The original stays as a branch (‹ 1/2 ›). Default false. */
   editAnyMessage?: boolean;
@@ -107,6 +110,28 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   /** Tapping an image in a message. Defaults to the built-in full-screen viewer (`imageViewer={false}` turns it off). */
   onImagePress?: (uri: string, alt?: string) => void;
   imageViewer?: boolean;
+  /**
+   * Slash commands: typing `/` suggests them; `/summarize text` sends the expanded prompt
+   * (the bubble shows `/summarize text`). See `defaultCommands`.
+   */
+  commands?: ChatCommand[];
+  /**
+   * Tap a file in a message to preview it. Text files (txt, md, csv, json, code) render in the app;
+   * PDFs need `documentViewer` (see createExpoDocumentViewer). Default true.
+   */
+  documentPreview?: boolean;
+  documentViewer?: DocumentViewerAdapter;
+  /**
+   * Hands-free voice conversation (listen → answer aloud → listen again), opened from a
+   * button next to the mic. Needs `voice` and `speech`. Default false.
+   */
+  voiceMode?: boolean;
+  /** Handle file taps yourself instead of the built-in preview. */
+  onFilePress?: (file: FilePart) => void;
+  /** Messages written while offline wait in the chat and send when the connection returns. Needs `network`. Default true. */
+  offlineQueue?: boolean;
+  /** `flushQueue` from useChat (spread in). */
+  flushQueue?: () => void;
   /** `selectBranch` from useChat (spread in). Shows ‹ 1/2 › on edited messages. */
   selectBranch?: (id: string, index: number) => void;
   /**
@@ -279,12 +304,24 @@ function ChatViewInner({
   math = false,
   onImagePress,
   imageViewer = true,
+  commands,
+  offlineQueue = true,
+  flushQueue,
+  documentPreview = true,
+  documentViewer,
+  onFilePress,
+  voiceMode = false,
 }: Omit<ChatViewProps, keyof ThemeProps | 'labels'>) {
   const theme = useChatTheme();
   const labels = useChatLabels();
   const listRef = useRef<FlatList<ChatListItem>>(null);
   const latestDataRef = useRef<ChatListItem[]>([]);
   const [showJump, setShowJump] = useState(false);
+
+  // Connectivity, read by send handlers (the banner state is set further down).
+  const onlineRef = useRef(network?.isOnline?.() ?? true);
+  const networkRef = useRef(network);
+  networkRef.current = network;
 
   // Haptics and sounds share one event stream.
   const feedbackRef = useRef({ haptics, sounds });
@@ -384,7 +421,9 @@ function ChatViewInner({
   const [replyingTo, setReplyingTo] = useState<ReplyReference | null>(null);
   const startEdit = useCallback((message: ChatMessage) => {
     setReplyingTo(null);
-    setEditing({ id: message.id, key: `${message.id}:${Date.now()}`, text: getMessageText(message) });
+    // A slash-command message is edited as typed (`/summarize …`), not as its expanded prompt.
+    const text = message.command ? `/${message.command.name} ${message.command.input}`.trim() : getMessageText(message);
+    setEditing({ id: message.id, key: `${message.id}:${Date.now()}`, text });
   }, []);
   const startReply = useCallback((message: ChatMessage) => {
     setEditing(null);
@@ -397,23 +436,38 @@ function ChatViewInner({
   }, [messages, editing, replyingTo]);
   const handleSend = useCallback(
     (text: string, options?: { attachments?: ChatAttachment[] }) => {
+      // Slash commands: run app code, or send the expanded prompt and remember what was typed.
+      const matched = matchCommand(text, commands);
+      if (matched?.command.onRun && !editing) {
+        feedback('select');
+        matched.command.onRun(matched.input);
+        return;
+      }
+      const command = matched ? { name: matched.command.name, input: matched.input } : undefined;
+      const outgoing = matched ? expandCommand(matched.command, matched.input) : text;
       feedback('send');
       if (editing && editMessage) {
-        editMessage(editing.id, text);
+        editMessage(editing.id, outgoing, command ? { command } : undefined);
         setEditing(null);
         return;
       }
-      send(text, replyingTo ? { ...options, replyTo: replyingTo } : options);
+      const queue = offlineQueue && !!networkRef.current && !onlineRef.current;
+      send(outgoing, {
+        ...options,
+        ...(replyingTo ? { replyTo: replyingTo } : {}),
+        ...(command ? { command } : {}),
+        ...(queue ? { queue: true } : {}),
+      });
       setReplyingTo(null);
     },
-    [editing, editMessage, send, replyingTo, feedback],
+    [editing, editMessage, send, replyingTo, feedback, commands, offlineQueue],
   );
   const sendText = useCallback(
     (text: string) => {
       feedback('send');
-      send(text);
+      send(text, offlineQueue && networkRef.current && !onlineRef.current ? { queue: true } : undefined);
     },
-    [send, feedback],
+    [send, feedback, offlineQueue],
   );
 
   // Tapping a quote scrolls to the original and briefly highlights it.
@@ -444,6 +498,13 @@ function ChatViewInner({
   const handleImagePress = useMemo(
     () => onImagePress ?? (imageViewer ? (uri: string, alt?: string) => setViewing({ uri, alt }) : undefined),
     [onImagePress, imageViewer],
+  );
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const canVoiceMode = voiceMode && !!voice && !!speech;
+  const [viewingFile, setViewingFile] = useState<FilePart | null>(null);
+  const handleFilePress = useMemo(
+    () => onFilePress ?? (documentPreview ? (file: FilePart) => setViewingFile(file) : undefined),
+    [onFilePress, documentPreview],
   );
   const mathRender = typeof math === 'object' ? math.render : undefined;
   const markdownFeatures = useMemo<MarkdownFeatures>(
@@ -537,8 +598,10 @@ function ChatViewInner({
     if (!network) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let wasOnline = network.isOnline?.() ?? true;
+    onlineRef.current = wasOnline;
     setOnline(wasOnline);
     const unsubscribe = network.subscribe((isOnline) => {
+      onlineRef.current = isOnline;
       setOnline(isOnline);
       if (isOnline && !wasOnline) {
         const last = latest.current.messages[latest.current.messages.length - 1];
@@ -556,6 +619,13 @@ function ChatViewInner({
       if (timer) clearTimeout(timer);
     };
   }, [network]);
+
+  // Send messages queued while offline, one reply at a time, once we're online.
+  const queuedCount = useMemo(() => messages.filter((m) => m.status === 'queued').length, [messages]);
+  useEffect(() => {
+    if (!offlineQueue || !flushQueue || !queuedCount || isStreaming || !online) return;
+    flushQueue();
+  }, [offlineQueue, flushQueue, queuedCount, isStreaming, online, messages]);
 
   const renderItem = useCallback(
     ({ item: listItem }: ListRenderItemInfo<ChatListItem>) => {
@@ -610,6 +680,7 @@ function ChatViewInner({
           linkCitations={linkCitations}
           onSelectBranch={selectBranch && !isStreaming ? handleSelectBranch : undefined}
           onImagePress={handleImagePress}
+          onFilePress={handleFilePress}
         />
       );
     },
@@ -670,6 +741,7 @@ function ChatViewInner({
       selectBranch,
       handleSelectBranch,
       handleImagePress,
+      handleFilePress,
     ],
   );
 
@@ -754,7 +826,7 @@ function ChatViewInner({
           style={[styles.banner, { backgroundColor: online ? theme.colors.success : theme.colors.text }]}
         >
           <Text style={[styles.bannerText, { color: theme.colors.background }, fontStyle(theme, 'bold')]}>
-            {online ? labels.reconnecting : labels.offline}
+            {online ? labels.reconnecting : queuedCount ? labels.offlineQueued(queuedCount) : labels.offline}
           </Text>
         </View>
       ) : null}
@@ -764,6 +836,16 @@ function ChatViewInner({
         onCancelEdit={() => setEditing(null)}
         replyingTo={replyingTo}
         onCancelReply={() => setReplyingTo(null)}
+        commands={commands}
+        onVoiceMode={
+          canVoiceMode
+            ? () => {
+                feedback('select');
+                speech?.stop();
+                setVoiceOpen(true);
+              }
+            : undefined
+        }
         topAccessory={
           models?.length && showModelPicker ? (
             <ModelPicker
@@ -808,6 +890,22 @@ function ChatViewInner({
         <View ref={rootRef} style={[rootStyle, { paddingBottom: keyboard.overlap > 0 ? keyboard.overlap + keyboardVerticalOffset : 0 }]}>
           {body}
           {imageViewer && !onImagePress ? <ImageViewer image={viewing} onClose={() => setViewing(null)} /> : null}
+          {canVoiceMode && voice && speech ? (
+            <VoiceMode
+              visible={voiceOpen}
+              onClose={() => setVoiceOpen(false)}
+              voice={voice}
+              speech={speech}
+              send={sendText}
+              messages={messages}
+              isStreaming={isStreaming}
+              stop={stop}
+              onStateChange={(state) => state === 'listening' && feedback('select')}
+            />
+          ) : null}
+          {documentPreview && !onFilePress ? (
+            <DocumentViewer file={viewingFile} adapter={documentViewer} onClose={() => setViewingFile(null)} />
+          ) : null}
         </View>
       </MarkdownFeaturesContext.Provider>
     </CodeBlockOptionsContext.Provider>

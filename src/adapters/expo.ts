@@ -8,7 +8,9 @@
  *   const attachments = createExpoAttachmentPickers({ ImagePicker, DocumentPicker, ImageManipulator });
  */
 import type { AttachmentPickers, ChatFeedbackEvent, ChatFeedbackHandler, SpeechRecognizer, TextToSpeech } from '../components/customization';
-import type { ChatAttachment } from '../types';
+import React from 'react';
+import type { DocumentViewerAdapter } from '../components/DocumentViewer';
+import type { ChatAttachment, FilePart } from '../types';
 
 // ---- Minimal structural types for the Expo modules (no import needed) ----
 
@@ -68,6 +70,22 @@ const newId = () => `att_${Date.now().toString(36)}_${(idCounter++).toString(36)
 const bytesOf = (base64: string) => Math.floor((base64.length * 3) / 4) - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
 
 /** Decode base64 to a UTF-8 string without relying on TextDecoder (not in every Hermes build). */
+/**
+ * Read a picked file from its local URI. expo-document-picker only returns base64 on
+ * web; on iOS and Android we read the cached copy ourselves (fetch works on file:// URIs).
+ */
+async function readPickedFile(uri: string, as: 'text' | 'base64'): Promise<string> {
+  const response = await fetch(uri);
+  if (as === 'text') return response.text();
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? '').replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read the file.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 export function base64ToUtf8(base64: string): string {
   const decode = (globalThis as { atob?: (data: string) => string }).atob;
   if (!decode) throw new Error('base64 decoding (atob) is not available in this JavaScript runtime.');
@@ -201,11 +219,12 @@ export function createExpoAttachmentPickers(options: ExpoAttachmentPickersOption
         if (mimeType.startsWith('image/')) {
           out.push(await fromImageAsset({ uri: doc.uri, fileName: doc.name, mimeType, base64: doc.base64, fileSize: doc.size }, doc.name));
         } else if (mimeType === 'application/pdf') {
-          if (!doc.base64) throw new Error(`Could not read "${doc.name}".`);
-          out.push({ id: newId(), kind: 'file', uri: doc.uri, name: doc.name, mimeType, size, base64: doc.base64 });
+          const base64 = doc.base64 || (await readPickedFile(doc.uri, 'base64').catch(() => ''));
+          if (!base64) throw new Error(`Could not read "${doc.name}".`);
+          out.push({ id: newId(), kind: 'file', uri: doc.uri, name: doc.name, mimeType, size: size ?? bytesOf(base64), base64 });
         } else if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml' || TEXT_EXTENSIONS.test(doc.name)) {
-          if (!doc.base64) throw new Error(`Could not read "${doc.name}".`);
-          let text = base64ToUtf8(doc.base64);
+          let text = doc.base64 ? base64ToUtf8(doc.base64) : await readPickedFile(doc.uri, 'text').catch(() => null);
+          if (text === null) throw new Error(`Could not read "${doc.name}".`);
           if (text.length > MAX_TEXT_CHARS) text = `${text.slice(0, MAX_TEXT_CHARS)}\n…(truncated)`;
           out.push({ id: newId(), kind: 'file', uri: doc.uri, name: doc.name, mimeType: mimeType.startsWith('text/') ? mimeType : 'text/plain', size, text });
         } else {
@@ -400,5 +419,93 @@ export function createExpoSounds(
     } catch {
       // Sounds are best effort.
     }
+  };
+}
+
+// ---- Document preview (react-native-webview + expo-sharing) ----
+
+type WebViewComponent = React.ComponentType<Record<string, unknown>>;
+/** expo-file-system/legacy: used to copy a file into the app's cache before sharing it. */
+type LegacyFileSystemModule = {
+  cacheDirectory: string | null;
+  copyAsync: (options: { from: string; to: string }) => Promise<void>;
+  makeDirectoryAsync?: (uri: string, options?: { intermediates?: boolean }) => Promise<void>;
+  writeAsStringAsync?: (uri: string, contents: string, options?: { encoding?: 'base64' | 'utf8' }) => Promise<void>;
+};
+
+type SharingModule = {
+  shareAsync: (url: string, options?: { mimeType?: string; UTI?: string; dialogTitle?: string }) => Promise<void>;
+  isAvailableAsync?: () => Promise<boolean>;
+};
+
+/**
+ * PDF preview and "Open in…" for the document viewer.
+ *
+ *   import { WebView } from 'react-native-webview';
+ *   import * as Sharing from 'expo-sharing';
+ *   import * as FileSystem from 'expo-file-system/legacy';
+ *   <ChatView documentViewer={createExpoDocumentViewer({ WebView, Sharing, FileSystem })} />
+ *
+ * iOS and web show PDFs inside the app; Android WebView can't, so Android offers
+ * "Open in…" (your PDF app) instead. Text files never need this adapter.
+ * With FileSystem, the file is first copied into the app's cache under its real name,
+ * which Expo Go requires for sharing and which gives the share sheet a proper file name.
+ */
+export function createExpoDocumentViewer({
+  WebView,
+  Sharing,
+  FileSystem,
+}: {
+  WebView?: WebViewComponent;
+  Sharing?: SharingModule;
+  FileSystem?: LegacyFileSystemModule;
+}): DocumentViewerAdapter {
+  /** A copy in the app's own cache, named like the original (falls back to the original URI). */
+  const shareableUri = async (file: FilePart): Promise<string | undefined> => {
+    if (!FileSystem?.cacheDirectory) return file.uri;
+    const dir = `${FileSystem.cacheDirectory}chat-share/`;
+    const target = `${dir}${file.name.replace(/[^\w.\- ]+/g, '_')}`;
+    try {
+      await FileSystem.makeDirectoryAsync?.(dir, { intermediates: true }).catch(() => {});
+      // Prefer the data we already hold: the picker's cache file may not be readable (e.g. in Expo Go).
+      if (file.base64 && FileSystem.writeAsStringAsync) await FileSystem.writeAsStringAsync(target, file.base64, { encoding: 'base64' });
+      else if (file.text !== undefined && FileSystem.writeAsStringAsync) await FileSystem.writeAsStringAsync(target, file.text);
+      else if (file.uri) await FileSystem.copyAsync({ from: file.uri, to: target });
+      else return undefined;
+      return target;
+    } catch {
+      return file.uri;
+    }
+  };
+  const pdfUri = (file: FilePart) => file.uri ?? (file.base64 ? `data:application/pdf;base64,${file.base64}` : undefined);
+  return {
+    renderPdf: WebView
+      ? (file) => {
+          const uri = pdfUri(file);
+          // Read lazily so this module also loads outside React Native (tests, servers).
+          const { Platform } = require('react-native') as typeof import('react-native');
+          if (!uri || Platform.OS === 'android') return undefined;
+          const directory = uri.startsWith('file://') ? uri.slice(0, uri.lastIndexOf('/') + 1) : undefined;
+          return React.createElement(WebView, {
+            source: { uri },
+            originWhitelist: ['*'],
+            allowFileAccess: true,
+            ...(directory ? { allowingReadAccessToURL: directory } : {}),
+            style: { flex: 1 },
+          });
+        }
+      : undefined,
+    open: Sharing
+      ? async (file) => {
+          if (Sharing.isAvailableAsync && !(await Sharing.isAvailableAsync())) return;
+          const uri = await shareableUri(file);
+          if (!uri) return;
+          await Sharing.shareAsync(uri, {
+            mimeType: file.mimeType,
+            ...(file.mimeType === 'application/pdf' ? { UTI: 'com.adobe.pdf' } : {}),
+            dialogTitle: file.name,
+          });
+        }
+      : undefined,
   };
 }
