@@ -119,3 +119,23 @@ export type NetworkMonitor = {
   /** Current state, if known synchronously. */
   isOnline?: () => boolean | undefined;
 };
+
+/** Moments the chat can react to with a haptic tap or a sound. */
+export type ChatFeedbackEvent =
+  /** The user sent a message. */
+  | 'send'
+  /** A reply finished streaming. */
+  | 'replyDone'
+  /** A reply failed. */
+  | 'error'
+  /** 👍 / 👎 tapped. */
+  | 'rate'
+  /** A message was long-pressed (menu opened). */
+  | 'longPress'
+  /** A choice was made: reply version, model, reasoning opened. */
+  | 'select'
+  /** A swipe passed the point where it starts a quote reply. */
+  | 'swipeReply';
+
+/** Called on chat events, e.g. to vibrate or play a sound. See createExpoHaptics / createExpoSounds. */
+export type ChatFeedbackHandler = (event: ChatFeedbackEvent) => void;

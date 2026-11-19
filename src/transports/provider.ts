@@ -49,11 +49,12 @@ export function createProviderTransport(options: ProviderTransportOptions): Chat
     );
   }
 
-  const { url, headers } = buildProviderRequest(config, []);
+  // The model picker can switch models per chat; the request is rebuilt for whichever model is active.
+  const withModel = (model?: string) => (model ? { ...config, model } : config);
   return createStreamTransport({
-    url,
-    headers,
-    body: (messages) => buildProviderRequest(config, toSimpleMessages(messages)).body,
+    url: ({ model }) => buildProviderRequest(withModel(model), []).url,
+    headers: buildProviderRequest(config, []).headers,
+    body: (messages, { model }) => buildProviderRequest(withModel(model), toSimpleMessages(messages)).body,
     parser: providerParser(config.provider),
   });
 }

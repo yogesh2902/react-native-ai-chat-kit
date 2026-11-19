@@ -1,7 +1,11 @@
-import { getMessageText, type ChatChunk, type ChatMessage, type ChatTransport } from '../types';
+import { getMessageText, type ChatChunk, type ChatMessage, type ChatSource, type ChatTransport } from '../types';
 
 export type MockStep =
   | { text: string }
+  /** Streamed as reasoning (the collapsible "Thinking" block). */
+  | { reasoning: string }
+  /** Cited pages, shown as source chips. */
+  | { sources: ChatSource[] }
   | { tool: { name: string; label?: string; args?: unknown; durationMs?: number; result?: unknown; error?: string } }
   /** Follow-up chips shown under the reply. */
   | { suggestions: string[] };
@@ -13,6 +17,11 @@ export type MockTransportOptions = {
   tokenDelayMs?: number;
   /** Delay before the first token in ms. */
   initialDelayMs?: number;
+  /**
+   * Stream a short "thinking" section before demo answers. 'auto' (default) does it
+   * when the picked model's id mentions "think" or "reason".
+   */
+  reasoning?: boolean | 'auto';
 };
 
 const sleep = (ms: number, signal: AbortSignal) =>
@@ -115,11 +124,50 @@ function attachmentReply(last: ChatMessage): MockStep[] | null {
   ];
 }
 
+const SEARCH_SOURCES: ChatSource[] = [
+  { url: 'https://reactnative.dev/blog', title: 'React Native Blog: latest releases' },
+  { url: 'https://expo.dev/changelog', title: 'Expo Changelog' },
+  { url: 'https://github.com/yogesh2902/react-native-ai-chat-kit', title: 'react-native-ai-chat-kit on GitHub' },
+];
+
+function searchReply(): MockStep[] {
+  return [
+    { tool: { name: 'web_search', label: 'Searching the web…', durationMs: 1300 } },
+    { sources: SEARCH_SOURCES },
+    {
+      text:
+        "Here's what I found (demo results):\n\n" +
+        '- **React Native** keeps shipping the New Architecture by default [1]\n' +
+        '- **Expo** releases a new SDK about three times a year [2]\n' +
+        '- This kit renders the pages a reply cites as **source chips** below it [3]\n\n' +
+        'Tap a source to open it.',
+    },
+    { suggestions: ['Show me the setup code', 'Plan a trip to Goa'] },
+  ];
+}
+
+function reasoningFor(text: string): string {
+  if (/search|news|latest|web|sources?/.test(text)) {
+    return '**What they want**\nRecent news, so my own knowledge may be out of date.\n\n**Plan**\nSearch the web, summarize the top results, and cite each one as a source.';
+  }
+  if (/trip|flight|travel|book|plan/.test(text)) {
+    return (
+      '**Understanding the request**\nThe user wants flight options to Goa. I should search flights for next Friday first.\n\n' +
+      '**Plan**\nCompare departure times and prices, then point out the cheapest option and offer to hold a seat.'
+    );
+  }
+  if (/code|setup|install|use|how/.test(text)) {
+    return '**What they need**\nA minimal integration example.\n\n**Approach**\nShow useChat plus ChatView with a stream transport, and keep it short.';
+  }
+  return '**Reading the question**\nA general greeting, so I should introduce the demo and list what the UI can render.\n\n**Answer shape**\nShort intro, a bullet list, then a nudge to try a tool call.';
+}
+
 function defaultReply(messages: ChatMessage[]): MockStep[] {
   const last = messages[messages.length - 1];
   const withFiles = last ? attachmentReply(last) : null;
   if (withFiles) return withFiles;
   const text = last ? getMessageText(last).toLowerCase() : '';
+  if (/search|news|latest|web|sources?/.test(text)) return searchReply();
   if (/before|earlier|previous|remember|recap|summar/.test(text)) return recapReply(messages);
   if (/trip|flight|travel|book|plan/.test(text)) {
     return [...DEMO_REPLIES[1]!, { suggestions: ['Show cheaper flights', 'Hold the Akasa seat', 'What can I do in Goa?'] }];
@@ -135,15 +183,28 @@ export function createMockTransport(options: MockTransportOptions = {}): ChatTra
   const { tokenDelayMs = 18, initialDelayMs = 450 } = options;
   let toolCounter = 0;
 
-  return async function* mockTransport({ messages, signal }): AsyncGenerator<ChatChunk> {
+  return async function* mockTransport({ messages, signal, model }): AsyncGenerator<ChatChunk> {
     const script = options.reply ? options.reply(messages) : defaultReply(messages);
-    const steps: MockStep[] = typeof script === 'string' ? [{ text: script }] : script;
+    let steps: MockStep[] = typeof script === 'string' ? [{ text: script }] : script;
+    const think = options.reasoning === 'auto' || options.reasoning === undefined ? /think|reason/i.test(model ?? '') : options.reasoning;
+    if (think && !options.reply && !steps.some((s) => 'reasoning' in s)) {
+      const last = messages[messages.length - 1];
+      steps = [{ reasoning: reasoningFor(last ? getMessageText(last).toLowerCase() : '') }, ...steps];
+    }
 
     await sleep(initialDelayMs, signal);
     for (const step of steps) {
       if (signal.aborted) return;
       if ('suggestions' in step) {
         yield { type: 'suggestions', suggestions: step.suggestions };
+      } else if ('sources' in step) {
+        for (const source of step.sources) yield { type: 'source', source };
+      } else if ('reasoning' in step) {
+        for (const token of tokenize(step.reasoning)) {
+          if (signal.aborted) return;
+          yield { type: 'reasoning-delta', text: token };
+          await sleep(tokenDelayMs * 0.7, signal);
+        }
       } else if ('text' in step) {
         for (const token of tokenize(step.text)) {
           if (signal.aborted) return;

@@ -39,7 +39,47 @@ export type FilePart = {
   text?: string;
 };
 
-export type MessagePart = TextPart | ToolCallPart | ImagePart | FilePart;
+/** The model's reasoning ("thinking") before or between its answer. Shown collapsed above the reply. */
+export type ReasoningPart = {
+  type: 'reasoning';
+  text: string;
+  /** When the reasoning started arriving (ms since epoch). */
+  startedAt?: number;
+  /** How long the model thought, set once the answer starts. */
+  durationMs?: number;
+};
+
+export type MessagePart = TextPart | ReasoningPart | ToolCallPart | ImagePart | FilePart;
+
+/** A web page or document the reply is based on (web search, RAG, citations). */
+export type ChatSource = {
+  /** Where it opens. Sources without a URL show as plain chips. */
+  url?: string;
+  title?: string;
+  /** A short quote from the source. */
+  snippet?: string;
+  id?: string;
+};
+
+/** An earlier answer kept when a reply is regenerated. */
+export type MessageVersion = {
+  parts: MessagePart[];
+  createdAt: number;
+  status?: MessageStatus;
+  error?: string;
+  rating?: 'up' | 'down';
+  suggestions?: string[];
+  sources?: ChatSource[];
+  model?: string;
+};
+
+/** The message a user is replying to (quote reply). */
+export type ReplyReference = {
+  id: string;
+  role: ChatRole;
+  /** The quoted text, shortened. */
+  text: string;
+};
 
 /** An image or document picked in the composer, ready to send. */
 export type ChatAttachment = {
@@ -71,6 +111,16 @@ export type ChatMessage = {
   rating?: 'up' | 'down';
   /** Follow-up prompts offered under an assistant reply. */
   suggestions?: string[];
+  /** Pages or documents the reply cites. */
+  sources?: ChatSource[];
+  /** Other answers to the same question (from Regenerate). The current one lives in the message itself. */
+  versions?: MessageVersion[];
+  /** Position of the current answer among all versions (0-based). Total = versions.length + 1. */
+  versionIndex?: number;
+  /** User messages: the message being quoted. */
+  replyTo?: ReplyReference;
+  /** Assistant messages: the model that wrote the reply. */
+  model?: string;
 };
 
 /**
@@ -83,6 +133,10 @@ export type ChatChunk =
   | { type: 'tool-call-end'; id: string; result?: unknown; error?: string }
   /** Follow-up prompts to show as chips under the reply. */
   | { type: 'suggestions'; suggestions: string[] }
+  /** Reasoning / thinking text, shown in a collapsible block above the answer. */
+  | { type: 'reasoning-delta'; text: string }
+  /** A source the answer cites. Duplicate URLs are ignored. */
+  | { type: 'source'; source: ChatSource }
   | { type: 'error'; message: string };
 
 export type TransportRequest = {
@@ -90,6 +144,8 @@ export type TransportRequest = {
   messages: ChatMessage[];
   /** Aborted when the user taps Stop or the component unmounts. */
   signal: AbortSignal;
+  /** The model picked in the model picker (`useChat({ model })`), if any. */
+  model?: string;
 };
 
 /** A transport turns a conversation into a stream of chunks. */

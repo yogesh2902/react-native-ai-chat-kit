@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0
+
+Every new feature is optional, with its own prop to turn it on or off.
+
+- **Reasoning**: replies from reasoning models show a collapsible "Thinking…" block with a live preview, then "Thought for 12s". `reasoning={true | false}` or `"expanded"`.
+- **Sources**: numbered source chips under answers that cite pages (web search, RAG). `showSources`, `onSourcePress`.
+- **Reply versions**: Regenerate keeps the earlier answer; switch with ‹ 2/3 ›. Each version keeps its own rating. `useChat({ keepReplyVersions })`, `regenerate()`, `selectVersion()`.
+- **Quote reply**: swipe a message (or long-press → Reply) to quote it; the quote is shown in the bubble and sent to the model. Tap a quote to jump to the original. `allowReply`.
+- **Model picker**: `models={[...]}` shows a picker above the input; the choice is sent as `model`, saved per chat and restored when it is reopened. `<ModelPicker>` is exported for custom headers.
+- **Code blocks**: richer highlighting (types, properties, JSX/HTML tags and attributes, decorators, SQL, CSS, YAML, diffs), optional line numbers, light/dark/auto code themes, and `renderCodeBlock` for any highlighter. `codeBlocks={false}` for plain code, or `codeBlocks={{ ... }}`.
+- **Haptics and sounds**: `createExpoHaptics(Haptics)` and `createExpoSounds(Audio)` (built-in sounds included), or any `(event) => void` function.
+- **Providers**: `reasoning` and `webSearch` options for Claude (adaptive thinking, web search citations), Gemini (thought summaries, Google Search grounding) and OpenAI (`reasoning_effort`, `web_search_options`). Parsers also read reasoning and citations from OpenAI-compatible APIs, the Responses API and AI SDK streams.
+- **Server**: `models` allowlist (`AI_MODELS`) for the model picker, plus `AI_REASONING` and `AI_WEB_SEARCH`.
+- New stream events `reasoning-delta` and `source`; the mock transport demos reasoning, web search and sources.
+
 ## 0.2.0
 
 A big update: conversation features, customization, and a visual refresh.

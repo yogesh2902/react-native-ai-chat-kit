@@ -195,3 +195,30 @@ describe('chat server', () => {
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
   });
 });
+
+describe('server model allowlist', () => {
+  async function modelUsed(options: { models?: string[] }, requested?: string) {
+    let sent: any;
+    const handler = createChatHandler({
+      provider: 'openai',
+      apiKey: 'k',
+      model: 'default-model',
+      ...options,
+      fetch: (async (_url: string, init: RequestInit) => {
+        sent = JSON.parse(String(init.body));
+        return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }) as typeof fetch,
+    });
+    const res = await handler(
+      new Request('http://x/chat', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }], model: requested }) }),
+    );
+    await res.text();
+    return sent.model;
+  }
+
+  it('uses a requested model only when it is allowed', async () => {
+    expect(await modelUsed({ models: ['fast', 'smart'] }, 'smart')).toBe('smart');
+    expect(await modelUsed({ models: ['fast'] }, 'expensive')).toBe('default-model');
+    expect(await modelUsed({}, 'smart')).toBe('default-model');
+  });
+});

@@ -1,11 +1,14 @@
-import React, { memo } from 'react';
-import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { memo, useMemo, useRef } from 'react';
+import { Animated, Image, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useChatLabels } from '../labels';
 import { StreamingMarkdown } from '../markdown/StreamingMarkdown';
 import { fontStyle, useChatTheme, withAlpha } from '../theme';
 import { getMessageText, type ChatMessage } from '../types';
-import type { ChatLayout, ChatStyles, MessageAction, MessageRenderers, TypingIndicatorStyle } from './customization';
+import type { ChatFeedbackHandler, ChatLayout, ChatStyles, MessageAction, MessageRenderers, TypingIndicatorStyle } from './customization';
 import { FadeIn, usePressScale } from './animations';
+import { ReasoningBlock } from './ReasoningBlock';
+import { SourceList } from './SourceList';
+import type { ChatSource } from '../types';
 import { ToolCallCard } from './ToolCallCard';
 import { TypingIndicator } from './TypingIndicator';
 
@@ -42,6 +45,25 @@ export type MessageBubbleProps = MessageRenderers & {
   animateIn?: boolean;
   /** 'icons' (default): compact icon toolbar under replies. 'labels': text buttons. */
   actionsStyle?: 'icons' | 'labels';
+  /** How the model's reasoning shows: `true` / 'collapsed' (default), 'expanded', or `false` to hide it. */
+  reasoning?: boolean | 'collapsed' | 'expanded';
+  /** Show the pages a reply cites. Default true. */
+  showSources?: boolean;
+  onSourcePress?: (source: ChatSource, index: number) => void;
+  /** Shows ‹ 2/3 › to switch between regenerated answers. */
+  onSelectVersion?: (message: ChatMessage, index: number) => void;
+  /** Enables swipe-to-reply on this message. */
+  onReply?: (message: ChatMessage) => void;
+  /** Tapping the quote in a reply (scroll to the original). */
+  onQuotePress?: (id: string) => void;
+  /** Haptics / sounds for swipe, version switch and reasoning toggles. */
+  onFeedbackEvent?: ChatFeedbackHandler;
+  /** Shown next to the timestamp, e.g. the model that wrote the reply. */
+  modelName?: string;
+  /** Mirror the swipe direction for right-to-left layouts. */
+  rtl?: boolean;
+  /** Briefly tint the message (after jumping to it from a quote). */
+  highlighted?: boolean;
 };
 
 const formatBytes = (n?: number) =>
@@ -71,6 +93,16 @@ function MessageBubbleImpl({
   timestamp,
   animateIn = false,
   actionsStyle = 'icons',
+  reasoning = 'collapsed',
+  showSources = true,
+  onSourcePress,
+  onSelectVersion,
+  onReply,
+  onQuotePress,
+  onFeedbackEvent,
+  modelName,
+  rtl = false,
+  highlighted = false,
 }: MessageBubbleProps) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -79,6 +111,9 @@ function MessageBubbleImpl({
   const color = isUser ? theme.colors.userText : theme.colors.assistantText;
   const lastPart = message.parts[message.parts.length - 1];
   const waiting = streaming && (message.parts.length === 0 || (lastPart?.type === 'tool-call' && lastPart.state === 'done'));
+  const versionCount = (message.versions?.length ?? 0) + 1;
+  const versionIndex = message.versionIndex ?? versionCount - 1;
+  const swipe = useSwipeToReply(onReply ? () => onReply(message) : undefined, rtl, onFeedbackEvent);
 
   if (message.role === 'system') return null;
   const compact = layout === 'compact';
@@ -91,7 +126,9 @@ function MessageBubbleImpl({
   const avatar = renderAvatar?.(message);
 
   return (
-    <FadeIn animate={animateIn} distance={isUser ? 6 : 10} style={[styles.row, compact && styles.rowCompact, isUser && styles.rowUser, custom.messageRow]}>
+    <FadeIn animate={animateIn} distance={isUser ? 6 : 10}>
+     {swipe.icon}
+     <Animated.View {...swipe.handlers} style={[styles.row, compact && styles.rowCompact, isUser && styles.rowUser, custom.messageRow, swipe.style, highlighted && { backgroundColor: withAlpha(theme.colors.accent, 0.08), borderRadius: theme.radius * 0.6 }]}>
       {avatar != null ? (
         <View style={[styles.avatar, isUser ? styles.avatarUser : styles.avatarAssistant, custom.avatar]}>{avatar}</View>
       ) : null}
@@ -112,7 +149,40 @@ function MessageBubbleImpl({
             isUser ? custom.userBubble : custom.assistantBubble,
           ]}
         >
+          {message.replyTo ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${labels.quotedMessage} ${message.replyTo.text}`}
+              disabled={!onQuotePress}
+              onPress={() => onQuotePress?.(message.replyTo!.id)}
+              style={[
+                styles.quote,
+                {
+                  borderLeftColor: theme.colors.accent,
+                  backgroundColor: withAlpha(isUser ? theme.colors.userText : theme.colors.text, 0.06),
+                  borderRadius: theme.radius * 0.45,
+                },
+              ]}
+            >
+              <Text numberOfLines={2} style={[{ color: isUser ? theme.colors.userText : theme.colors.text, fontSize: theme.fontSize * 0.82, opacity: 0.8 }, fontStyle(theme)]}>
+                {message.replyTo.text}
+              </Text>
+            </Pressable>
+          ) : null}
           {message.parts.map((part, i) => {
+            if (part.type === 'reasoning') {
+              if (reasoning === false || isUser || !part.text.trim()) return null;
+              const thinking = streaming && i === message.parts.length - 1 && part.durationMs === undefined;
+              return (
+                <ReasoningBlock
+                  key={`r${i}`}
+                  part={part}
+                  thinking={thinking}
+                  defaultExpanded={reasoning === 'expanded'}
+                  onToggle={() => onFeedbackEvent?.('select')}
+                />
+              );
+            }
             if (part.type === 'text') {
               return isUser ? (
                 <Text
@@ -191,8 +261,12 @@ function MessageBubbleImpl({
           ) : null}
         </Pressable>
 
-        {timestamp ? (
-          <Text style={[styles.timestamp, { color: theme.colors.textMuted }, fontStyle(theme)]}>{timestamp}</Text>
+        {!isUser && showSources && message.sources?.length ? <SourceList sources={message.sources} onSourcePress={onSourcePress} /> : null}
+
+        {timestamp || (!isUser && modelName && !streaming) ? (
+          <Text style={[styles.timestamp, { color: theme.colors.textMuted }, fontStyle(theme)]}>
+            {[timestamp, !isUser && !streaming ? modelName : undefined].filter(Boolean).join(' · ')}
+          </Text>
         ) : null}
 
         {isUser && onEdit && message.status !== 'streaming' ? (
@@ -201,8 +275,41 @@ function MessageBubbleImpl({
           </View>
         ) : null}
 
-        {!isUser && !streaming && (onCopyMessage || onSpeak || onFeedback || inlineActions?.length || (isLast && onRetry)) ? (
+        {!isUser && !streaming && (onCopyMessage || onSpeak || onFeedback || inlineActions?.length || (isLast && onRetry) || (onSelectVersion && versionCount > 1)) ? (
           <View style={[styles.actions, actionsStyle === 'icons' && styles.iconActions]}>
+            {onSelectVersion && versionCount > 1 ? (
+              <View style={styles.versions} accessibilityRole="adjustable" accessibilityLabel={labels.versionOf(versionIndex + 1, versionCount)}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={labels.previousVersion}
+                  disabled={versionIndex === 0}
+                  hitSlop={8}
+                  onPress={() => {
+                    onFeedbackEvent?.('select');
+                    onSelectVersion(message, versionIndex - 1);
+                  }}
+                  style={({ pressed }) => [styles.versionArrow, { opacity: versionIndex === 0 ? 0.3 : pressed ? 0.5 : 1 }]}
+                >
+                  <Text style={[styles.versionGlyph, { color: theme.colors.textMuted }]}>‹</Text>
+                </Pressable>
+                <Text style={[styles.versionText, { color: theme.colors.textMuted }, fontStyle(theme, 'bold')]}>
+                  {versionIndex + 1}/{versionCount}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={labels.nextVersion}
+                  disabled={versionIndex >= versionCount - 1}
+                  hitSlop={8}
+                  onPress={() => {
+                    onFeedbackEvent?.('select');
+                    onSelectVersion(message, versionIndex + 1);
+                  }}
+                  style={({ pressed }) => [styles.versionArrow, { opacity: versionIndex >= versionCount - 1 ? 0.3 : pressed ? 0.5 : 1 }]}
+                >
+                  <Text style={[styles.versionGlyph, { color: theme.colors.textMuted }]}>›</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {onFeedback && message.status !== 'error' ? (
               <>
                 <Action
@@ -249,7 +356,14 @@ function MessageBubbleImpl({
                 onPress={() => action.onPress(message)}
               />
             ))}
-            {isLast && onRetry ? <Action kind={actionsStyle} icon="↻" label={labels.retry} onPress={onRetry} /> : null}
+            {isLast && onRetry ? (
+              <Action
+                kind={actionsStyle}
+                icon="↻"
+                label={message.status === 'error' ? labels.retry : labels.regenerate}
+                onPress={onRetry}
+              />
+            ) : null}
           </View>
         ) : null}
 
@@ -263,8 +377,65 @@ function MessageBubbleImpl({
           </View>
         ) : null}
       </View>
+     </Animated.View>
     </FadeIn>
   );
+}
+
+/**
+ * Swipe a message sideways to quote it in a reply (like WhatsApp). The reply
+ * arrow fades in as you drag; passing the threshold gives a haptic tick.
+ */
+function useSwipeToReply(onReply: (() => void) | undefined, rtl: boolean, feedback?: ChatFeedbackHandler) {
+  const theme = useChatTheme();
+  const dx = useRef(new Animated.Value(0)).current;
+  const armed = useRef(false);
+  const latest = useRef({ onReply, feedback });
+  latest.current = { onReply, feedback };
+  const dir = rtl ? -1 : 1;
+  const THRESHOLD = 56;
+
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) =>
+          !!latest.current.onReply && dir * g.dx > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 2.2,
+        onPanResponderMove: (_e, g) => {
+          const distance = Math.max(0, Math.min(84, dir * g.dx * 0.75));
+          dx.setValue(distance * dir);
+          if (distance >= THRESHOLD && !armed.current) {
+            armed.current = true;
+            latest.current.feedback?.('swipeReply');
+          } else if (distance < THRESHOLD) armed.current = false;
+        },
+        onPanResponderRelease: () => {
+          if (armed.current) latest.current.onReply?.();
+          armed.current = false;
+          Animated.spring(dx, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 6 }).start();
+        },
+        onPanResponderTerminate: () => {
+          armed.current = false;
+          Animated.spring(dx, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 6 }).start();
+        },
+      }),
+    [dx, dir],
+  );
+
+  if (!onReply) return { handlers: {}, style: undefined, icon: null };
+  const opacity = dx.interpolate({ inputRange: rtl ? [-THRESHOLD, -12, 0] : [0, 12, THRESHOLD], outputRange: rtl ? [1, 0, 0] : [0, 0, 1], extrapolate: 'clamp' });
+  const scale = dx.interpolate({ inputRange: rtl ? [-THRESHOLD, 0] : [0, THRESHOLD], outputRange: rtl ? [1, 0.6] : [0.6, 1], extrapolate: 'clamp' });
+  return {
+    handlers: responder.panHandlers,
+    style: { transform: [{ translateX: dx }] },
+    icon: (
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.replyIcon, rtl ? styles.replyIconRtl : styles.replyIconLtr, { opacity, transform: [{ scale }], backgroundColor: theme.colors.inputBackground }]}
+      >
+        <Text style={{ color: theme.colors.textMuted, fontSize: 16, fontWeight: '700' }}>{'↩\uFE0E'}</Text>
+      </Animated.View>
+    ),
+  };
 }
 
 function ActionButton({
@@ -396,5 +567,13 @@ const styles = StyleSheet.create({
   suggestion: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
   iconActions: { gap: 2, marginTop: 4, marginLeft: -6 },
   iconButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  versions: { flexDirection: 'row', alignItems: 'center', marginRight: 4 },
+  versionArrow: { width: 22, height: 32, alignItems: 'center', justifyContent: 'center' },
+  versionGlyph: { fontSize: 20, fontWeight: '600', marginTop: -2 },
+  versionText: { fontSize: 12, minWidth: 26, textAlign: 'center' },
+  quote: { borderLeftWidth: 3, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 6 },
+  replyIcon: { position: 'absolute', top: '50%', marginTop: -16, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  replyIconLtr: { left: 6 },
+  replyIconRtl: { right: 6 },
   iconGlyph: { fontSize: 15, fontWeight: '600' },
 });

@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import * as Audio from 'expo-audio';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Speech from 'expo-speech';
@@ -13,6 +15,8 @@ import {
   ChatHistory,
   ChatView,
   createExpoAttachmentPickers,
+  createExpoHaptics,
+  createExpoSounds,
   createExpoSpeech,
   createKeyValueStore,
   createMockTransport,
@@ -29,6 +33,7 @@ import {
   PALETTE_NAMES,
   applyPalette,
   type ChatLabelsOverrides,
+  type ChatModelOption,
   type ChatPalette,
   type ChatLayout,
   type MessageAction,
@@ -161,7 +166,7 @@ const welcome: WelcomeConfig = {
   cards: [
     { icon: '✈️', title: 'Plan a trip', description: 'Flights and ideas for Goa', prompt: 'Plan a trip to Goa' },
     { icon: '💻', title: 'Setup code', description: 'Add the kit to an app', prompt: 'Show me the setup code' },
-    { icon: '🧩', title: 'What can you render?', description: 'Markdown, tables, code' },
+    { icon: '🔎', title: 'Search the web', description: 'An answer with sources', prompt: 'Search the latest React Native news' },
     { icon: '🖼', title: 'Send a photo', description: 'Tap ＋ below to attach one', prompt: 'How do I attach a photo?' },
   ],
 };
@@ -170,6 +175,17 @@ const welcome: WelcomeConfig = {
 const messageActions: MessageAction[] = [
   { key: 'share', icon: '↗', label: 'Share', inline: true, onPress: (m) => void Share.share({ message: getMessageText(m) }) },
 ];
+
+// Model picker (above the input). The mock transport "thinks" first for models whose id mentions thinking.
+// With a real backend, list the same ids in the server's `models` option (or AI_MODELS).
+const MODELS: ChatModelOption[] = [
+  { id: 'demo-thinking', name: 'Demo Thinking', description: 'Shows its reasoning before answering', badge: 'Reasoning', icon: '🧠' },
+  { id: 'demo-fast', name: 'Demo Fast', description: 'Answers right away', badge: 'Fast', icon: '⚡' },
+];
+
+// Light haptic taps (send, rate, long-press, swipe-to-reply) and short sounds (send, reply done, error).
+const haptics = Platform.OS === 'web' ? undefined : createExpoHaptics(Haptics);
+const sounds = Platform.OS === 'web' ? undefined : createExpoSounds(Audio, { volume: 0.6 });
 
 // Offline banner + auto-retry when the connection comes back.
 const network = Platform.OS === 'web' ? createWebNetworkMonitor() : createNetInfoMonitor(NetInfo);
@@ -232,7 +248,7 @@ function Demo() {
     () => (CHAT_URL ? createStreamTransport({ url: CHAT_URL }) : createMockTransport()),
     [],
   );
-  const chat = useChatSessions({ transport, store, restoreLastSession: true, maxAgeDays: 30 });
+  const chat = useChatSessions({ transport, store, restoreLastSession: true, maxAgeDays: 30, model: MODELS[0]!.id });
   const activeTitle = chat.sessions.find((s) => s.id === chat.activeSessionId)?.title ?? 'New chat';
 
   return (
@@ -252,6 +268,11 @@ function Demo() {
         streamingCursor
         messageActions={messageActions}
         allowDelete
+        allowReply
+        models={MODELS}
+        codeBlocks={{ lineNumbers: true, theme: 'auto' }}
+        haptics={haptics}
+        sounds={sounds}
         network={network}
         onFeedback={(message, rating) => console.log('[feedback]', rating, message.id)}
         suggestions={['What can you render?', 'Plan a trip to Goa', 'Show me the setup code']}
@@ -412,7 +433,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
-  title: { flex: 1, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  title: { flex: 1, fontSize: 16, fontWeight: '700', textAlign: 'left', marginLeft: 2 },
   headerActions: { flexDirection: 'row', gap: 14 },
   headerButton: { paddingHorizontal: 6, minWidth: 28, alignItems: 'center' },
   historyTop: { flexDirection: 'row', paddingHorizontal: 10 },

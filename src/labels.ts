@@ -51,6 +51,27 @@ export type ChatLabels = {
   offline: string;
   reconnecting: string;
 
+  // Reasoning, sources, versions
+  thoughtFor: (seconds: number) => string;
+  showReasoning: string;
+  hideReasoning: string;
+  sources: (count: number) => string;
+  openSource: (title: string) => string;
+  previousVersion: string;
+  nextVersion: string;
+  versionOf: (current: number, total: number) => string;
+  regenerate: string;
+
+  // Quote reply
+  reply: string;
+  replyingTo: (role: 'user' | 'assistant' | 'system') => string;
+  cancelReply: string;
+  quotedMessage: string;
+
+  // Model picker
+  chooseModel: string;
+  currentModel: (name: string) => string;
+
   // Tool cards
   toolRunning: string;
   toolDone: string;
@@ -122,6 +143,24 @@ export const defaultLabels: ChatLabels = {
   closeMenu: 'Close menu',
   offline: "You're offline. Messages will send when you're back online.",
   reconnecting: 'Back online. Retrying…',
+
+  thoughtFor: (seconds) => (seconds < 1 ? 'Thought for a moment' : `Thought for ${seconds}s`),
+  showReasoning: 'Show reasoning',
+  hideReasoning: 'Hide reasoning',
+  sources: (count) => (count === 1 ? '1 source' : `${count} sources`),
+  openSource: (title) => `Open ${title}`,
+  previousVersion: 'Previous answer',
+  nextVersion: 'Next answer',
+  versionOf: (current, total) => `Answer ${current} of ${total}`,
+  regenerate: 'Regenerate',
+
+  reply: 'Reply',
+  replyingTo: (role) => (role === 'user' ? 'Replying to your message' : 'Replying to the answer'),
+  cancelReply: 'Cancel reply',
+  quotedMessage: 'Quoted message. Tap to show it.',
+
+  chooseModel: 'Choose model',
+  currentModel: (name) => `Model: ${name}`,
 
   toolRunning: 'Working…',
   toolDone: 'Done',

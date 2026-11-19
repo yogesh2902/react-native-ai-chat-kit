@@ -21,6 +21,20 @@ export type ProviderConfig = {
   baseUrl?: string;
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Ask the model to show its reasoning (rendered as a collapsible "Thinking" block).
+   * `true` uses the provider's default effort; or pass 'low' | 'medium' | 'high'.
+   * Anthropic: adaptive thinking with summarized display. Gemini: thought summaries.
+   * OpenAI: sets reasoning_effort (OpenAI-compatible APIs like DeepSeek stream reasoning on their own).
+   */
+  reasoning?: boolean | 'low' | 'medium' | 'high';
+  /**
+   * Let the model search the web; cited pages show as source chips under the reply.
+   * Anthropic: the web_search server tool. Gemini: Google Search grounding.
+   * OpenAI Chat Completions: web_search_options (needs a search-capable model).
+   * Pass an object to tune it, e.g. `{ maxUses: 3 }` or `{ toolType: 'web_search_20250305' }` for older Claude models.
+   */
+  webSearch?: boolean | { maxUses?: number; toolType?: string };
 };
 
 /** A file sent to the model as base64. Text documents should be inlined into `content` instead. */
@@ -117,6 +131,8 @@ export function buildProviderRequest(config: ProviderConfig, messages: ProviderM
         ],
       };
       if (config.temperature !== undefined) body.temperature = config.temperature;
+      if (typeof config.reasoning === 'string' && !custom) body.reasoning_effort = config.reasoning;
+      if (config.webSearch) body.web_search_options = {};
       // OpenAI's own API uses max_completion_tokens; compatible APIs still expect max_tokens.
       if (config.maxTokens !== undefined) body[custom ? 'max_tokens' : 'max_completion_tokens'] = config.maxTokens;
       return {
@@ -149,6 +165,17 @@ export function buildProviderRequest(config: ProviderConfig, messages: ProviderM
       };
       if (system) body.system = system;
       if (config.temperature !== undefined) body.temperature = config.temperature;
+      if (config.reasoning) {
+        // Current Claude models think adaptively; 'summarized' makes the reasoning visible.
+        body.thinking = { type: 'adaptive', display: 'summarized' };
+        if (typeof config.reasoning === 'string') body.output_config = { effort: config.reasoning };
+      }
+      if (config.webSearch) {
+        const opts = typeof config.webSearch === 'object' ? config.webSearch : {};
+        body.tools = [
+          { type: opts.toolType ?? 'web_search_20260209', name: 'web_search', ...(opts.maxUses ? { max_uses: opts.maxUses } : {}) },
+        ];
+      }
       return {
         url: `${base}/messages`,
         headers: {
@@ -164,6 +191,7 @@ export function buildProviderRequest(config: ProviderConfig, messages: ProviderM
       const generationConfig: Record<string, unknown> = {};
       if (config.temperature !== undefined) generationConfig.temperature = config.temperature;
       if (config.maxTokens !== undefined) generationConfig.maxOutputTokens = config.maxTokens;
+      if (config.reasoning) generationConfig.thinkingConfig = { includeThoughts: true };
       const body: Record<string, unknown> = {
         contents: alternate(messages).map((t) => ({
           role: t.role === 'assistant' ? 'model' : 'user',
@@ -175,6 +203,7 @@ export function buildProviderRequest(config: ProviderConfig, messages: ProviderM
       };
       if (system) body.systemInstruction = { parts: [{ text: system }] };
       if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
+      if (config.webSearch) body.tools = [{ google_search: {} }];
       return {
         url: `${base}/models/${encodeURIComponent(config.model)}:streamGenerateContent?alt=sse`,
         headers: { 'x-goog-api-key': config.apiKey },

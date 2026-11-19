@@ -37,6 +37,11 @@ export type ChatHandlerOptions = ProviderConfig & {
   maxMessageChars?: number;
   /** Max total size of attached images/PDFs per request, in bytes. Default 15 MB. */
   maxAttachmentBytes?: number;
+  /**
+   * Models the app may pick (the model picker sends `model` in the body).
+   * Anything not listed is ignored and `model` is used, so users can't switch to a model you didn't approve.
+   */
+  models?: string[];
   /** Let the app send its own system messages. Off by default so users can't override your system prompt. */
   allowClientSystemMessages?: boolean;
   /** Edit the conversation before it goes to the provider, e.g. to add retrieved documents (RAG). */
@@ -143,7 +148,9 @@ export function createChatHandler(options: ChatHandlerOptions | (() => ChatHandl
     if (config.transformMessages) messages = await config.transformMessages(messages, request);
     if (!messages.some((m) => m.role === 'user')) return jsonError(400, 'No user message to reply to.', cors);
 
-    const upstreamRequest = buildProviderRequest(config, messages);
+    const requested = (body as Json | null)?.model;
+    const model = typeof requested === 'string' && config.models?.includes(requested) ? requested : config.model;
+    const upstreamRequest = buildProviderRequest({ ...config, model }, messages);
     const doFetch = config.fetch ?? fetch;
     let upstream: Response;
     try {
@@ -224,6 +231,9 @@ const KEY_FALLBACK: Record<ProviderName, string> = {
  * - `AI_API_KEY`: or OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY
  * - `AI_MODEL`: e.g. claude-sonnet-5-5
  * - `AI_SYSTEM_PROMPT`, `AI_BASE_URL`, `AI_TEMPERATURE`, `AI_MAX_TOKENS` (optional)
+ * - `AI_MODELS` (optional): comma-separated models the app's model picker may choose
+ * - `AI_REASONING` (optional): true | low | medium | high, to stream the model's reasoning
+ * - `AI_WEB_SEARCH` (optional): true, to let the model search the web and cite sources
  * - `CHAT_ACCESS_TOKEN` (optional): require `Authorization: Bearer <token>` from the app
  */
 export function chatOptionsFromEnv(env: Env): ChatHandlerOptions {
@@ -238,8 +248,17 @@ export function chatOptionsFromEnv(env: Env): ChatHandlerOptions {
     baseUrl: env.AI_BASE_URL || undefined,
     temperature: num(env.AI_TEMPERATURE),
     maxTokens: num(env.AI_MAX_TOKENS),
+    models: env.AI_MODELS ? env.AI_MODELS.split(',').map((m) => m.trim()).filter(Boolean) : undefined,
+    reasoning: readReasoning(env.AI_REASONING),
+    webSearch: /^(1|true|yes|on)$/i.test(env.AI_WEB_SEARCH ?? '') || undefined,
     authorize: token ? (req) => req.headers.get('authorization') === `Bearer ${token}` : undefined,
   };
+}
+
+function readReasoning(value: string | undefined): ChatHandlerOptions['reasoning'] {
+  const v = (value ?? '').trim().toLowerCase();
+  if (v === 'low' || v === 'medium' || v === 'high') return v;
+  return /^(1|true|yes|on)$/.test(v) || undefined;
 }
 
 /** `createChatHandler` configured from environment variables (read on each request). */

@@ -1,5 +1,5 @@
 // Hook
-export { useChat } from './useChat';
+export { useChat, toReplyReference, allVersions } from './useChat';
 export type { UseChatOptions, UseChatResult, SendOptions } from './useChat';
 
 // Conversation history
@@ -15,6 +15,8 @@ export { ChatHistory } from './components/ChatHistory';
 export type { ChatHistoryProps, ChatHistoryItemRenderProps } from './components/ChatHistory';
 export type {
   AttachmentPickers,
+  ChatFeedbackEvent,
+  ChatFeedbackHandler,
   ChatLayout,
   ChatStyles,
   MessageAction,
@@ -35,14 +37,23 @@ export {
   createExpoAttachmentPickers,
   createExpoSpeech,
   createExpoSpeechRecognizer,
+  createExpoHaptics,
+  createExpoSounds,
+  defaultChatSounds,
   optimizeImage,
   base64ToUtf8,
 } from './adapters/expo';
-export type { ExpoAttachmentPickersOptions, ImageOptimizationOptions } from './adapters/expo';
+export type { ExpoAttachmentPickersOptions, ImageOptimizationOptions, HapticPattern, SoundSource } from './adapters/expo';
 export { createWebSpeechRecognizer, isWebSpeechRecognitionAvailable } from './adapters/web';
 export { toSpeakableText } from './markdown/plainText';
 export { ChatThemeProvider, useResolvedTheme, presetTheme } from './components/ChatThemeProvider';
 export { WelcomeScreen } from './components/WelcomeScreen';
+export { ReasoningBlock } from './components/ReasoningBlock';
+export type { ReasoningBlockProps } from './components/ReasoningBlock';
+export { SourceList, sourceDomain } from './components/SourceList';
+export type { SourceListProps } from './components/SourceList';
+export { ModelPicker } from './components/ModelPicker';
+export type { ModelPickerProps, ChatModelOption } from './components/ModelPicker';
 export { MessageMenu } from './components/MessageMenu';
 export type { MessageMenuItem } from './components/MessageMenu';
 export { buildListItems, formatMessageTime, formatDateSeparator } from './components/chatListItems';
@@ -58,8 +69,8 @@ export type { ComposerProps } from './components/Composer';
 export { ToolCallCard, humanizeToolName } from './components/ToolCallCard';
 export { TypingIndicator } from './components/TypingIndicator';
 export type { TypingIndicatorProps } from './components/TypingIndicator';
-export { StreamingMarkdown } from './markdown/StreamingMarkdown';
-export type { StreamingMarkdownProps } from './markdown/StreamingMarkdown';
+export { StreamingMarkdown, CodeBlockOptionsContext, lightCodeColors } from './markdown/StreamingMarkdown';
+export type { StreamingMarkdownProps, CodeBlockOptions } from './markdown/StreamingMarkdown';
 
 // Transports
 export { createStreamTransport, toSimpleMessages } from './transports/stream';
@@ -77,6 +88,7 @@ export type { StreamParser, SSEEvent } from './transports/parsers';
 export { parseBlocks, parseInline } from './markdown/parse';
 export type { Block, InlineNode } from './markdown/parse';
 export { highlight } from './markdown/highlight';
+export type { Token, TokenKind } from './markdown/highlight';
 
 // Labels (translations)
 export { defaultLabels, mergeLabels, useChatLabels, ChatLabelsContext } from './labels';
@@ -87,7 +99,7 @@ export { lightTheme, darkTheme, mergeTheme, useChatTheme, ChatThemeContext, font
 export type { ChatTheme, ChatThemeOverrides, ChatPalette } from './theme';
 
 // Types & utils
-export { applyChunk, applyChunks } from './applyChunk';
+export { applyChunk, applyChunks, settleReasoning } from './applyChunk';
 export { getMessageText } from './types';
 export type {
   ChatMessage,
@@ -98,6 +110,10 @@ export type {
   MessagePart,
   MessageStatus,
   TextPart,
+  ReasoningPart,
+  ChatSource,
+  MessageVersion,
+  ReplyReference,
   ToolCallPart,
   ImagePart,
   FilePart,

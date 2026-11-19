@@ -76,6 +76,7 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
   const activeRef = useRef<{ id: string; createdAt: number; title?: string } | null>(null);
   const lastSavedRef = useRef<ChatMessage[]>(chat.messages);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedModelRef = useRef(chat.model);
 
   const upsertMeta = useCallback((meta: ChatSessionMeta) => {
     setSessions((prev) => [meta, ...prev.filter((s) => s.id !== meta.id)].sort((a, b) => b.updatedAt - a.updatedAt));
@@ -105,6 +106,7 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
       updatedAt: Date.now(),
       preview: derivePreview(normalized),
       messageCount: normalized.filter((m) => m.role !== 'system').length,
+      ...(chatRef.current.model ? { model: chatRef.current.model } : {}),
       messages: normalized,
     };
     upsertMeta(toMeta(session));
@@ -128,6 +130,15 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
     }
   }, [chat.messages, chat.isStreaming, flushSave, streamingSaveIntervalMs]);
 
+  // Picking another model in an open chat saves that choice with it.
+  useEffect(() => {
+    if (savedModelRef.current === chat.model) return;
+    savedModelRef.current = chat.model;
+    if (!activeRef.current || chat.isStreaming || chatRef.current.messages.length === 0) return;
+    lastSavedRef.current = [];
+    void flushSave();
+  }, [chat.model, chat.isStreaming, flushSave]);
+
   const refreshSessions = useCallback(async () => {
     try {
       setSessions(await storeRef.current.list());
@@ -146,6 +157,11 @@ export function useChatSessions(options: UseChatSessionsOptions): UseChatSession
     const messages = session?.messages ?? [];
     lastSavedRef.current = messages;
     chatRef.current.setMessages(messages);
+    // A reopened chat continues with the model it used; a new chat keeps the current pick.
+    if (session?.model && session.model !== chatRef.current.model) {
+      savedModelRef.current = session.model; // restoring, not a change to save
+      chatRef.current.setModel(session.model);
+    }
   }, []);
 
   const newSession = useCallback(() => {
