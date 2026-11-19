@@ -48,7 +48,8 @@ export function toMeta(session: ChatSession): ChatSessionMeta {
  */
 export function deriveTitle(messages: ChatMessage[], maxLength = 48): string {
   const users = messages.filter((m) => m.role === 'user');
-  const typed = users.map((m) => getMessageText(m).replace(/\s+/g, ' ').trim()).find(Boolean);
+  const shown = (m: ChatMessage) => (m.command ? `/${m.command.name} ${m.command.input}` : getMessageText(m));
+  const typed = users.map((m) => shown(m).replace(/\s+/g, ' ').trim()).find(Boolean);
   if (typed) return typed.length > maxLength ? `${typed.slice(0, maxLength - 1).trimEnd()}…` : typed;
   for (const m of users) {
     for (const part of m.parts) {

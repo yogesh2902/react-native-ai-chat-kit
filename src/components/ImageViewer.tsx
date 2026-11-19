@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Modal, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Platform, Pressable, Share, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useChatLabels } from '../labels';
 
 export type ImageViewerProps = {
@@ -27,7 +27,7 @@ export function ImageViewer({ image, onClose, shareable = true, topInset = 0 }: 
             style={styles.image}
           />
         ) : null}
-        <View style={[styles.bar, { paddingTop: Math.max(topInset, Platform.OS === 'ios' ? 54 : 28) }]}>
+        <View style={[styles.bar, { paddingTop: Math.max(topInset, Platform.OS === 'ios' ? 54 : (StatusBar.currentHeight ?? 24) + 8) }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={labels.closeImage} hitSlop={12} onPress={onClose} style={styles.button}>
             <Text style={styles.buttonText}>✕</Text>
           </Pressable>

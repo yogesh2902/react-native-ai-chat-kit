@@ -18,6 +18,7 @@ import {
 import { useChatLabels } from '../labels';
 import { fontStyle, useChatTheme, withAlpha } from '../theme';
 import type { ChatAttachment, ReplyReference } from '../types';
+import { suggestCommands, type ChatCommand } from '../commands';
 import type {
   AttachmentPickers,
   SendButtonRenderProps,
@@ -64,6 +65,10 @@ export type ComposerProps = {
   onCancelReply?: () => void;
   /** Rendered above the input box, left-aligned (ChatView puts the model picker here). */
   topAccessory?: React.ReactNode;
+  /** Slash commands suggested while typing `/…`. */
+  commands?: ChatCommand[];
+  /** Shows a voice-conversation button next to the mic. */
+  onVoiceMode?: () => void;
 };
 
 const formatBytes = (n?: number) =>
@@ -93,6 +98,8 @@ export function Composer({
   replyingTo,
   onCancelReply,
   topAccessory,
+  commands,
+  onVoiceMode,
 }: ComposerProps) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -212,6 +219,7 @@ export function Composer({
   // Stop the recognizer if the composer unmounts mid-dictation.
   useEffect(() => () => voice?.abort?.(), [voice]);
 
+  const commandMatches = suggestCommands(text, commands);
   const regular = fontStyle(theme);
   const showMic = !!voice && !isStreaming && !listening && text.trim().length === 0 && pending.length === 0;
 
@@ -289,6 +297,36 @@ export function Composer({
       ) : null}
 
       {topAccessory ? <View style={styles.topAccessory}>{topAccessory}</View> : null}
+
+      {commandMatches.length > 0 ? (
+        <View
+          accessibilityLabel={labels.commands}
+          style={[styles.commands, { backgroundColor: colors.background, borderColor: colors.border, borderRadius: theme.radius * 0.7 }]}
+        >
+          {commandMatches.map((c) => (
+            <Pressable
+              key={c.name}
+              accessibilityRole="button"
+              accessibilityLabel={`/${c.name}${c.description ? `. ${c.description}` : ''}`}
+              onPress={() => {
+                setText(`/${c.name} `);
+                inputRef.current?.focus();
+              }}
+              style={({ pressed }) => [styles.commandRow, { backgroundColor: pressed ? colors.inputBackground : 'transparent' }]}
+            >
+              <Text style={styles.commandIcon}>{c.icon ?? '⚡'}</Text>
+              <View style={styles.commandText}>
+                <Text style={[{ color: colors.text, fontSize: 14, fontFamily: theme.monoFont }, fontStyle(theme, 'bold')]}>/{c.name}</Text>
+                {c.description ? (
+                  <Text numberOfLines={1} style={[{ color: colors.textMuted, fontSize: 12 }, regular]}>
+                    {c.description}
+                  </Text>
+                ) : null}
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       {menuOpen ? (
         <View style={[styles.menu, { backgroundColor: colors.inputBackground, borderColor: colors.border, borderRadius: theme.radius * 0.7 }]}>
@@ -406,6 +444,17 @@ export function Composer({
             }}
           />
           {accessoryRight}
+          {onVoiceMode && showMic ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={labels.voiceMode}
+              onPress={onVoiceMode}
+              hitSlop={6}
+              style={({ pressed }) => [styles.voiceMode, { borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}
+            >
+              <WaveIcon color={colors.text} />
+            </Pressable>
+          ) : null}
           {actionButton}
         </View>
       </View>
@@ -450,6 +499,17 @@ function SendButton({
   );
 }
 
+/** Three bars, like a sound wave: voice conversation mode. */
+function WaveIcon({ color }: { color: string }) {
+  return (
+    <View style={styles.wave} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {[8, 14, 10, 16, 8].map((h, i) => (
+        <View key={i} style={[styles.waveBar, { height: h, backgroundColor: color }]} />
+      ))}
+    </View>
+  );
+}
+
 function MicIcon({ color }: { color: string }) {
   return (
     <View style={styles.micWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -479,6 +539,13 @@ function PulsingDot() {
 const styles = StyleSheet.create({
   wrap: { paddingHorizontal: 12, paddingTop: 8 },
   error: { fontSize: 13, marginBottom: 6, marginHorizontal: 4 },
+  commands: { borderWidth: StyleSheet.hairlineWidth, marginBottom: 8, paddingVertical: 4, overflow: 'hidden' },
+  commandRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  commandIcon: { fontSize: 18, width: 24, textAlign: 'center' },
+  commandText: { flex: 1 },
+  voiceMode: { width: 34, height: 34, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', marginRight: 6 },
+  wave: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  waveBar: { width: 2.5, borderRadius: 2 },
   replyBanner: { flexDirection: 'row', alignItems: 'center', borderLeftWidth: 3, paddingLeft: 10, paddingRight: 6, paddingVertical: 6, marginBottom: 8, marginHorizontal: 2 },
   replyText: { flex: 1 },
   replyClose: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },

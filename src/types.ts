@@ -86,6 +86,7 @@ export type MessageBranch = {
   parts: MessagePart[];
   createdAt: number;
   replyTo?: ReplyReference;
+  command?: { name: string; input: string };
   /** The messages that came after it in that branch. */
   following: ChatMessage[];
 };
@@ -115,7 +116,8 @@ export type ChatAttachment = {
   text?: string;
 };
 
-export type MessageStatus = 'streaming' | 'done' | 'error' | 'stopped';
+/** 'queued': written while offline, sent automatically when the connection returns. */
+export type MessageStatus = 'streaming' | 'done' | 'error' | 'stopped' | 'queued';
 
 export type ChatMessage = {
   id: string;
@@ -136,6 +138,8 @@ export type ChatMessage = {
   versionIndex?: number;
   /** User messages: the message being quoted. */
   replyTo?: ReplyReference;
+  /** User messages sent with a slash command: what was typed (`/summarize …`). The text part holds the full prompt. */
+  command?: { name: string; input: string };
   /** User messages: other wordings from edits, each with its own conversation. The current one lives in the message. */
   branches?: MessageBranch[];
   /** Position of the current wording among all branches (0-based). Total = branches.length + 1. */

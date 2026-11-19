@@ -92,6 +92,7 @@ export const StyleSheet = {
 };
 export const Platform = { OS: 'ios', select: (o: Record<string, unknown>) => o.ios ?? o.native ?? o.default };
 export const I18nManager = { isRTL: false };
+export const StatusBar = { currentHeight: 24 };
 export const Keyboard = { addListener: () => ({ remove: () => {} }), dismiss: () => {} };
 export const LayoutAnimation = { configureNext: () => {}, create: () => ({}), Types: { keyboard: 'keyboard' } };
 export const AccessibilityInfo = {

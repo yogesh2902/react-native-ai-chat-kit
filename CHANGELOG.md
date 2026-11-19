@@ -11,8 +11,14 @@ Every new feature is optional, with its own switch.
 - **Math**: `math` renders LaTeX (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`) as readable Unicode with no dependencies, or through your own renderer (`math={{ render }}`).
 - **Generated images**: a new `image` stream event (with progressive previews), parsed from OpenAI image generation, Gemini and AI SDK file parts; markdown images render too. Tap any image for a full-screen viewer with Share (`imageViewer`, `onImagePress`).
 - **Accessibility**: messages announce who is speaking; "Reply ready" / failure announcements; icons capped for very large text; shimmer animations respect Reduce Motion; version and branch switchers are adjustable controls.
+- **Slash commands**: `commands` suggests `/…` commands as you type. Prompt commands send an expanded prompt while the bubble shows what was typed; `onRun` commands run app code. `defaultCommands` included (summarize, translate, explain, fix, shorter).
+- **Offline queue**: with a `network` monitor, messages sent offline are kept as "Waiting for connection" and sent in order when the connection returns (`offlineQueue`, `flushQueue`, `send(text, { queue: true })`).
+- **Document preview**: tap a file in a message to preview it. Text, Markdown, code, CSV and JSON render in the app; PDFs through `createExpoDocumentViewer` (in-app on iOS and web, "Open in…" on Android).
+- **Voice conversation mode**: `voiceMode` adds a button that opens a hands-free conversation: listen, send, read the answer aloud, listen again.
+- **Fix**: text and PDF attachments failed to load on iOS and Android ("Could not read …"), because the document picker only returns base64 on web; files are now read from their local URI.
+- **Fix (Android)**: the image and document viewers' close buttons no longer sit under the status bar.
 - **Fix (iOS)**: actions in the long-press menu that open a share sheet or another dialog now wait until the menu has closed, so they no longer silently fail.
-- **Tests**: component tests with a React Native stand-in (renders the real components), plus tests for approvals, branches, export, math and images (143 in total).
+- **Tests**: component tests with a React Native stand-in (renders the real components), plus tests for approvals, branches, export, math, images, commands, the offline queue, document preview and voice mode (153 in total).
 - **Docs**: a demo GIF in the README.
 
 ## 0.3.0
