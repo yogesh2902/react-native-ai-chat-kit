@@ -8,6 +8,8 @@
 
 Smooth streaming markdown, tool-call cards, chat history, stop/retry, dark mode, and a `useChat()` hook that works with **OpenAI, Anthropic (Claude), Google Gemini, the Vercel AI SDK, or your own backend**.
 
+<p align="center"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/demo.gif" width="300" alt="Demo: a web search answer streams in with reasoning and source chips, then the assistant asks for approval before holding a flight seat"></p>
+
 <table>
   <tr>
     <td align="center" width="25%"><img src="https://raw.githubusercontent.com/yogesh2902/react-native-ai-chat-kit/main/docs/screenshots/01-welcome.png" width="200" alt="Empty chat screen with starter prompt suggestions"><br><sub>Starter suggestions</sub></td>
@@ -23,7 +25,7 @@ Smooth streaming markdown, tool-call cards, chat history, stop/retry, dark mode,
   </tr>
 </table>
 
-<sub>Real screenshots of the <a href="https://github.com/yogesh2902/react-native-ai-chat-kit/tree/main/example">example app</a> (mock mode, no API key). A demo GIF is coming.</sub>
+<sub>Real screenshots of the <a href="https://github.com/yogesh2902/react-native-ai-chat-kit/tree/main/example">example app</a> (mock mode, no API key).</sub>
 
 ```tsx
 import { ChatView, useChat, createStreamTransport } from 'react-native-ai-chat-kit';
@@ -59,6 +61,11 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - 🧩 **Model picker**: let users switch models per chat (saved with each conversation).
 - 🧑‍💻 **Code blocks** with syntax highlighting (15+ languages, diffs), line numbers, light/dark themes and a Copy button.
 - 📳 **Haptics and sounds** on send, rate, swipe and reply done (opt-in).
+- 🛑 **Tool approval**: the AI asks "Book this flight?" with Approve / Deny before it acts.
+- 🗂️ **Chat tools**: pin, rename, export/share chats, and search inside every message.
+- ✏️ **Edit any message**: the original stays as a branch you can flip back to (‹ 1/2 ›).
+- 📐 **Math** (LaTeX → readable Unicode, or plug in your own renderer) and 🖼️ **AI-generated images** with a full-screen viewer.
+- ♿ **Accessible**: screen readers hear who's speaking and when a reply is ready; respects Reduce Motion and large text.
 - 📊 Tables, lists, task lists, quotes, headings, links.
 - ⏹️ **Stop & Retry**, error states, "scroll to latest" button.
 - 💬 **Starter suggestions** for empty chats, and **follow-up chips** under replies.
@@ -370,6 +377,42 @@ createChatHandler({ provider: 'gemini', apiKey, model, reasoning: true, webSearc
 - Your own backend can send `{ "type": "reasoning-delta", "text": "…" }` and `{ "type": "source", "source": { "url": "…", "title": "…" } }` events.
 - The server only uses a model the app asks for if it is in `models`, so users can't switch to a model you didn't approve.
 
+## Tool approval, chat tools, branches, math and images (0.4)
+
+Every feature here is optional too.
+
+```tsx
+<ChatView
+  {...chat} // respondToTool, selectBranch… come from useChat / useChatSessions
+  editAnyMessage // long-press → Edit on older messages too (default false)
+  math // render LaTeX in replies (default false, since $ is common in text)
+  linkCitations // [1] [2] become tappable superscripts (default true)
+  imageViewer // tap images to view full screen (default true)
+/>
+
+<ChatHistory
+  sessions={chat.sessions}
+  onSelect={chat.openSession}
+  onDelete={chat.deleteSession}
+  onPin={chat.pinSession}
+  onRename={chat.renameSession}
+  onExport={async (id) => Share.share({ message: await chat.exportSession(id) })}
+  searchMessages={chat.searchSessions} // search inside messages, not just titles
+/>
+```
+
+| Feature | Turn on / off | Notes |
+| --- | --- | --- |
+| **Tool approval** | Automatic when your stream sends `tool-approval-request` | The reply pauses on an Approve / Deny card; `chat.respondToTool(id, approved)` continues the same reply. Your backend sees `approval: 'approved' \| 'denied'` on the tool part (and the model gets a one-line note). A new message cancels pending approvals. Customize with `renderToolCall(part, message, respond)`. |
+| **Pin / rename / export** | `onPin`, `onRename`, `onExport` on `ChatHistory` | Long-press a chat for the actions sheet. Pinned chats get their own section. `exportChat(messages)` gives Markdown or plain text for any conversation. |
+| **Search inside messages** | `searchMessages={chat.searchSessions}` | Matches titles, previews and every message's text. |
+| **Edit older messages** | `editAnyMessage` (default `false`); `useChat({ keepEditBranches })` (default `true`) | Editing keeps the original wording and its replies as a branch: ‹ 1/2 › switches. The model only sees the current branch. |
+| **Tappable citations** | `linkCitations` (default `true`) | `[1]`, `[2]`… in replies become small ¹ ² links to the matching source. |
+| **Math** | `math` (default `false`), or `math={{ render }}` | `$…$`, `$$…$$`, `\(…\)`, `\[…\]` → x², ½, √x, ∑, α… with no dependencies. Plug in a KaTeX WebView or react-native-math-view through `render` for full typesetting. |
+| **Generated images** | `imageViewer` (default `true`), `onImagePress` | Images from OpenAI image generation (with progressive previews), Gemini, AI SDK `file` parts, markdown `![](…)` or your own `{ "type": "image", "url" \| "base64" }` events. Tap to view full screen and share. |
+
+**Accessibility:** screen readers hear "You said / Assistant said" before each message and get "Reply ready" when an answer finishes; icons don't clip at large text sizes; shimmer animations stop with Reduce Motion; and the ‹ › switchers work as adjustable controls (swipe up/down).
+
 ## Chat history (previous conversations)
 
 Swap `useChat` for `useChatSessions` and every conversation is saved automatically. Users can reopen any past chat and keep talking: new replies get that chat's full history as context.
@@ -418,8 +461,9 @@ function Assistant() {
 | `onError` | `(error) => void` | Stream failed. |
 | `model` | `string` | Starting model for the model picker. Sent to the transport as `model`. |
 | `keepReplyVersions` | `boolean` | Keep earlier answers when regenerating (default `true`). |
+| `keepEditBranches` | `boolean` | Keep the original when a message is edited, as a branch (default `true`). |
 
-Returns `{ messages, status, isStreaming, error, send, stop, retry, regenerate, selectVersion, clear, setMessages, rateMessage, editMessage, deleteMessage, model, setModel }`.
+Returns `{ messages, status, isStreaming, error, send, stop, retry, regenerate, selectVersion, selectBranch, respondToTool, clear, setMessages, rateMessage, editMessage, deleteMessage, model, setModel }`.
 
 `send(text, { attachments, replyTo })` also takes attachments from the pickers (see *Images, documents and voice*) and a message to quote.
 
@@ -453,6 +497,9 @@ Spread `useChat()` into it, plus:
 | `models`, `showModelPicker`, `onModelChange` | Model picker above the input |
 | `codeBlocks` | Code highlighting, line numbers, light/dark theme, custom renderer |
 | `haptics`, `sounds` | Feedback on chat events (`createExpoHaptics`, `createExpoSounds`) |
+| `respondToTool`, `onToolDecision` | Approve / Deny cards for tools that need the user's OK |
+| `editAnyMessage`, `selectBranch` | Edit older messages; ‹ 1/2 › between edited versions |
+| `linkCitations`, `math`, `imageViewer`, `onImagePress` | Tappable citations, LaTeX math, image viewer |
 | `renderMessage` | Render messages yourself |
 | `bottomInset`, `keyboardVerticalOffset` | Safe-area and header offsets |
 
@@ -475,7 +522,7 @@ const myTransport: ChatTransport = async function* ({ messages, signal }) {
 
 ### Building blocks
 
-Use the pieces on their own: `StreamingMarkdown`, `MessageBubble`, `Composer`, `ToolCallCard`, `TypingIndicator`, `ReasoningBlock`, `SourceList`, `ModelPicker`, plus `parseBlocks`, `parseInline` and `highlight`.
+Use the pieces on their own: `StreamingMarkdown`, `MessageBubble`, `Composer`, `ToolCallCard`, `TypingIndicator`, `ReasoningBlock`, `SourceList`, `ModelPicker`, `ImageViewer`, plus `parseBlocks`, `parseInline`, `highlight`, `texToUnicode` and `exportChat`.
 
 ```tsx
 <StreamingMarkdown streaming={isStreaming}>{text}</StreamingMarkdown>

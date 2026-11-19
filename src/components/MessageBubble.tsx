@@ -60,6 +60,14 @@ export type MessageBubbleProps = MessageRenderers & {
   onFeedbackEvent?: ChatFeedbackHandler;
   /** Shown next to the timestamp, e.g. the model that wrote the reply. */
   modelName?: string;
+  /** Turn [1], [2]… in replies into tappable links to their sources. Default true. */
+  linkCitations?: boolean;
+  /** Tapping an image (opens the full-screen viewer in ChatView). */
+  onImagePress?: (uri: string, alt?: string) => void;
+  /** Shows ‹ 1/2 › under edited user messages to switch between wordings. */
+  onSelectBranch?: (message: ChatMessage, index: number) => void;
+  /** Approve / Deny on tools that need the user's OK. */
+  onToolDecision?: (toolCallId: string, approved: boolean) => void;
   /** Mirror the swipe direction for right-to-left layouts. */
   rtl?: boolean;
   /** Briefly tint the message (after jumping to it from a quote). */
@@ -103,6 +111,10 @@ function MessageBubbleImpl({
   modelName,
   rtl = false,
   highlighted = false,
+  onToolDecision,
+  linkCitations = true,
+  onSelectBranch,
+  onImagePress,
 }: MessageBubbleProps) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -113,6 +125,8 @@ function MessageBubbleImpl({
   const waiting = streaming && (message.parts.length === 0 || (lastPart?.type === 'tool-call' && lastPart.state === 'done'));
   const versionCount = (message.versions?.length ?? 0) + 1;
   const versionIndex = message.versionIndex ?? versionCount - 1;
+  const branchCount = (message.branches?.length ?? 0) + 1;
+  const branchIndex = message.branchIndex ?? branchCount - 1;
   const swipe = useSwipeToReply(onReply ? () => onReply(message) : undefined, rtl, onFeedbackEvent);
 
   if (message.role === 'system') return null;
@@ -149,6 +163,10 @@ function MessageBubbleImpl({
             isUser ? custom.userBubble : custom.assistantBubble,
           ]}
         >
+          {/* Screen readers hear who is speaking before the message itself. */}
+          <Text style={styles.srOnly} accessibilityRole="text">
+            {isUser ? labels.youSaid : labels.assistantSaid}
+          </Text>
           {message.replyTo ? (
             <Pressable
               accessibilityRole="button"
@@ -200,6 +218,8 @@ function MessageBubbleImpl({
                   onCopyCode={onCopyCode}
                   onLinkPress={onLinkPress}
                   selectable={selectable}
+                  citations={linkCitations ? message.sources : undefined}
+                  onCitationPress={onSourcePress}
                 >
                   {streaming && streamingCursor && i === lastTextIndex && i === message.parts.length - 1
                     ? part.text.replace(/\s+$/, '') + streamingCursor
@@ -208,22 +228,46 @@ function MessageBubbleImpl({
               );
             }
             if (part.type === 'tool-call') {
-              const customCard = renderToolCall?.(part, message);
-              return <React.Fragment key={part.id}>{customCard !== undefined ? customCard : <ToolCallCard part={part} />}</React.Fragment>;
+              const respond =
+                part.state === 'awaiting-approval' && onToolDecision
+                  ? (approved: boolean) => {
+                      onFeedbackEvent?.('select');
+                      onToolDecision(part.id, approved);
+                    }
+                  : undefined;
+              const customCard = renderToolCall?.(part, message, respond);
+              return (
+                <React.Fragment key={part.id}>
+                  {customCard !== undefined ? customCard : <ToolCallCard part={part} onDecision={respond} />}
+                </React.Fragment>
+              );
             }
             if (part.type === 'image') {
               const ratio = part.width && part.height ? part.width / part.height : 4 / 3;
               // Cache files can be cleaned up by the OS; fall back to the saved data.
               const uri = part.uri || (part.base64 ? `data:${part.mimeType ?? 'image/jpeg'};base64,${part.base64}` : '');
               if (!uri) return null;
-              return (
+              const alt = part.alt ?? part.name ?? labels.image;
+              const image = (
                 <Image
-                  key={i}
                   source={{ uri }}
                   accessibilityIgnoresInvertColors
-                  accessibilityLabel={part.name ?? 'Image'}
-                  style={[styles.image, { aspectRatio: ratio, borderRadius: theme.radius * 0.6 }]}
+                  accessibilityLabel={alt}
+                  style={[styles.image, { aspectRatio: ratio, borderRadius: theme.radius * 0.6, backgroundColor: theme.colors.inputBackground }]}
                 />
+              );
+              return onImagePress ? (
+                <Pressable
+                  key={part.id ?? i}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel={labels.openImage(alt)}
+                  onPress={() => onImagePress(uri, part.alt ?? part.name)}
+                  onLongPress={onLongPress ? () => onLongPress(message) : undefined}
+                >
+                  {image}
+                </Pressable>
+              ) : (
+                <React.Fragment key={part.id ?? i}>{image}</React.Fragment>
               );
             }
             if (part.type === 'file') {
@@ -269,46 +313,41 @@ function MessageBubbleImpl({
           </Text>
         ) : null}
 
-        {isUser && onEdit && message.status !== 'streaming' ? (
-          <View style={styles.actions}>
-            <ActionButton label={`✎ ${labels.edit}`} accessibilityLabel={labels.edit} onPress={() => onEdit(message)} />
+        {isUser && ((onEdit && message.status !== 'streaming') || (onSelectBranch && branchCount > 1)) ? (
+          <View style={[styles.actions, styles.userActions]}>
+            {onSelectBranch && branchCount > 1 ? (
+              <Switcher
+                index={branchIndex}
+                count={branchCount}
+                label={labels.editOf(branchIndex + 1, branchCount)}
+                previousLabel={labels.previousEdit}
+                nextLabel={labels.nextEdit}
+                onSelect={(i) => {
+                  onFeedbackEvent?.('select');
+                  onSelectBranch(message, i);
+                }}
+              />
+            ) : null}
+            {onEdit && message.status !== 'streaming' ? (
+              <ActionButton label={`✎ ${labels.edit}`} accessibilityLabel={labels.edit} onPress={() => onEdit(message)} />
+            ) : null}
           </View>
         ) : null}
 
         {!isUser && !streaming && (onCopyMessage || onSpeak || onFeedback || inlineActions?.length || (isLast && onRetry) || (onSelectVersion && versionCount > 1)) ? (
           <View style={[styles.actions, actionsStyle === 'icons' && styles.iconActions]}>
             {onSelectVersion && versionCount > 1 ? (
-              <View style={styles.versions} accessibilityRole="adjustable" accessibilityLabel={labels.versionOf(versionIndex + 1, versionCount)}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={labels.previousVersion}
-                  disabled={versionIndex === 0}
-                  hitSlop={8}
-                  onPress={() => {
-                    onFeedbackEvent?.('select');
-                    onSelectVersion(message, versionIndex - 1);
-                  }}
-                  style={({ pressed }) => [styles.versionArrow, { opacity: versionIndex === 0 ? 0.3 : pressed ? 0.5 : 1 }]}
-                >
-                  <Text style={[styles.versionGlyph, { color: theme.colors.textMuted }]}>‹</Text>
-                </Pressable>
-                <Text style={[styles.versionText, { color: theme.colors.textMuted }, fontStyle(theme, 'bold')]}>
-                  {versionIndex + 1}/{versionCount}
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={labels.nextVersion}
-                  disabled={versionIndex >= versionCount - 1}
-                  hitSlop={8}
-                  onPress={() => {
-                    onFeedbackEvent?.('select');
-                    onSelectVersion(message, versionIndex + 1);
-                  }}
-                  style={({ pressed }) => [styles.versionArrow, { opacity: versionIndex >= versionCount - 1 ? 0.3 : pressed ? 0.5 : 1 }]}
-                >
-                  <Text style={[styles.versionGlyph, { color: theme.colors.textMuted }]}>›</Text>
-                </Pressable>
-              </View>
+              <Switcher
+                index={versionIndex}
+                count={versionCount}
+                label={labels.versionOf(versionIndex + 1, versionCount)}
+                previousLabel={labels.previousVersion}
+                nextLabel={labels.nextVersion}
+                onSelect={(i) => {
+                  onFeedbackEvent?.('select');
+                  onSelectVersion(message, i);
+                }}
+              />
             ) : null}
             {onFeedback && message.status !== 'error' ? (
               <>
@@ -430,12 +469,72 @@ function useSwipeToReply(onReply: (() => void) | undefined, rtl: boolean, feedba
     icon: (
       <Animated.View
         pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
         style={[styles.replyIcon, rtl ? styles.replyIconRtl : styles.replyIconLtr, { opacity, transform: [{ scale }], backgroundColor: theme.colors.inputBackground }]}
       >
         <Text style={{ color: theme.colors.textMuted, fontSize: 16, fontWeight: '700' }}>{'↩\uFE0E'}</Text>
       </Animated.View>
     ),
   };
+}
+
+/** ‹ 2/3 › to step through versions of a reply or wordings of an edited message. */
+function Switcher({
+  index,
+  count,
+  label,
+  previousLabel,
+  nextLabel,
+  onSelect,
+}: {
+  index: number;
+  count: number;
+  label: string;
+  previousLabel: string;
+  nextLabel: string;
+  onSelect: (index: number) => void;
+}) {
+  const theme = useChatTheme();
+  const atStart = index === 0;
+  const atEnd = index >= count - 1;
+  return (
+    <View
+      style={styles.versions}
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={label}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'increment' && !atEnd) onSelect(index + 1);
+        if (e.nativeEvent.actionName === 'decrement' && !atStart) onSelect(index - 1);
+      }}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={previousLabel}
+        disabled={atStart}
+        hitSlop={10}
+        onPress={() => onSelect(index - 1)}
+        style={({ pressed }) => [styles.versionArrow, { opacity: atStart ? 0.3 : pressed ? 0.5 : 1 }]}
+      >
+        <Text maxFontSizeMultiplier={1.4} style={[styles.versionGlyph, { color: theme.colors.textMuted }]}>‹</Text>
+      </Pressable>
+      <Text style={[styles.versionText, { color: theme.colors.textMuted }, fontStyle(theme, 'bold')]}>
+        {index + 1}/{count}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={nextLabel}
+        disabled={atEnd}
+        hitSlop={10}
+        onPress={() => onSelect(index + 1)}
+        style={({ pressed }) => [styles.versionArrow, { opacity: atEnd ? 0.3 : pressed ? 0.5 : 1 }]}
+      >
+        <Text maxFontSizeMultiplier={1.4} style={[styles.versionGlyph, { color: theme.colors.textMuted }]}>›</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 function ActionButton({
@@ -514,7 +613,7 @@ function Action({
       {/* Emoji can't be tinted, so unselected ones are dimmed. The opacity sits on a
           View because iOS ignores it on emoji text. */}
       <View style={{ opacity: emoji && !selected ? 0.45 : 1 }}>
-        <Text style={[styles.iconGlyph, !emoji && { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{icon}</Text>
+        <Text maxFontSizeMultiplier={1.4} style={[styles.iconGlyph, !emoji && { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{icon}</Text>
       </View>
     </Pressable>
   );
@@ -568,9 +667,11 @@ const styles = StyleSheet.create({
   iconActions: { gap: 2, marginTop: 4, marginLeft: -6 },
   iconButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   versions: { flexDirection: 'row', alignItems: 'center', marginRight: 4 },
+  userActions: { alignItems: 'center' },
   versionArrow: { width: 22, height: 32, alignItems: 'center', justifyContent: 'center' },
   versionGlyph: { fontSize: 20, fontWeight: '600', marginTop: -2 },
   versionText: { fontSize: 12, minWidth: 26, textAlign: 'center' },
+  srOnly: { position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' },
   quote: { borderLeftWidth: 3, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 6 },
   replyIcon: { position: 'absolute', top: '50%', marginTop: -16, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   replyIconLtr: { left: 6 },

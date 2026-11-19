@@ -1,9 +1,11 @@
 import React, { createContext, memo, useContext, useMemo, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import { useChatLabels } from '../labels';
 import { fontStyle, useChatTheme, type ChatTheme } from '../theme';
+import type { ChatSource } from '../types';
 import { resolveCodeBlocks } from '../components/featureSwitches';
 import { highlight } from './highlight';
+import { texToUnicode } from './math';
 import { parseBlocks, parseInline, type Block, type InlineNode } from './parse';
 
 /** How code blocks look. Pass as `codeBlocks` on ChatView (or StreamingMarkdown). */
@@ -21,6 +23,23 @@ export type CodeBlockOptions = {
 };
 
 export const CodeBlockOptionsContext = createContext<CodeBlockOptions>({});
+
+/** Math (LaTeX) rendering. Pass as `math` on ChatView. */
+export type MathOptions = {
+  /** Render math yourself (e.g. with a KaTeX WebView or react-native-math-view). Return undefined for the built-in Unicode rendering. */
+  render?: (tex: string, display: boolean) => React.ReactNode | undefined;
+};
+
+/** Markdown features ChatView turns on for every message. */
+export type MarkdownFeatures = {
+  /** LaTeX math. Off when undefined. */
+  math?: MathOptions;
+  /** Tapping an image in a reply (opens the viewer in ChatView). */
+  onImagePress?: (uri: string, alt?: string) => void;
+};
+
+export const MarkdownFeaturesContext = createContext<MarkdownFeatures>({});
+const NO_RENDERER: MathOptions = {};
 
 
 /** GitHub-light style colors for `codeBlocks.theme: 'light'`. */
@@ -66,6 +85,12 @@ export type StreamingMarkdownProps = {
   selectable?: boolean;
   /** Code block options (`false` = plain code). Defaults to the ones ChatView provides via `codeBlocks`. */
   codeBlocks?: boolean | CodeBlockOptions;
+  /** Render LaTeX math (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`). Defaults to what ChatView's `math` prop sets. */
+  math?: boolean | MathOptions;
+  /** Sources for this text: `[1]`, `[2]`… become tappable superscripts that open them. */
+  citations?: ChatSource[];
+  /** Tapping a citation. Defaults to opening the source's URL. */
+  onCitationPress?: (source: ChatSource, index: number) => void;
 };
 
 type Ctx = {
@@ -75,6 +100,10 @@ type Ctx = {
   onCopyCode?: (code: string) => void;
   selectable: boolean;
   code: CodeBlockOptions;
+  citations?: ChatSource[];
+  onCitationPress?: (source: ChatSource, index: number) => void;
+  math?: MathOptions;
+  onImagePress?: (uri: string, alt?: string) => void;
 };
 
 export function StreamingMarkdown({
@@ -85,10 +114,15 @@ export function StreamingMarkdown({
   onCopyCode,
   selectable = true,
   codeBlocks,
+  citations,
+  onCitationPress,
+  math: mathProp,
 }: StreamingMarkdownProps) {
   const theme = useChatTheme();
   const contextCode = useContext(CodeBlockOptionsContext);
-  const blocks = useMemo(() => parseBlocks(children), [children]);
+  const features = useContext(MarkdownFeaturesContext);
+  const math = mathProp === undefined ? features.math : mathProp === false ? undefined : mathProp === true ? features.math ?? NO_RENDERER : mathProp;
+  const blocks = useMemo(() => parseBlocks(children, { math: !!math }), [children, math]);
   const ctx: Ctx = {
     theme,
     color: color ?? theme.colors.assistantText,
@@ -96,6 +130,10 @@ export function StreamingMarkdown({
     onCopyCode,
     selectable,
     code: codeBlocks === undefined || codeBlocks === true ? contextCode : resolveCodeBlocks(codeBlocks),
+    citations: citations?.length ? citations : undefined,
+    onCitationPress,
+    math,
+    onImagePress: features.onImagePress,
   };
 
   return (
@@ -122,6 +160,9 @@ const MemoBlock = memo(BlockView, (a, b) =>
   a.ctx.color === b.ctx.color &&
   !!a.ctx.onCopyCode === !!b.ctx.onCopyCode &&
   a.ctx.code === b.ctx.code &&
+  a.ctx.citations === b.ctx.citations &&
+  a.ctx.math === b.ctx.math &&
+  a.ctx.onImagePress === b.ctx.onImagePress &&
   (a.block.type !== 'code' || b.block.type !== 'code' || a.block.closed === b.block.closed),
 );
 
@@ -139,21 +180,21 @@ function BlockView({ block, partial, ctx, first }: { block: Block; partial: bool
           selectable={ctx.selectable}
           style={[base, spacing, { fontSize: theme.fontSize * scale, lineHeight: theme.fontSize * scale * 1.35, ...fontStyle(theme, 'bold') }]}
         >
-          <Inline nodes={parseInline(block.text, partial)} ctx={ctx} />
+          <Inline nodes={parseInline(block.text, partial, { math: !!ctx.math })} ctx={ctx} />
         </Text>
       );
     }
     case 'paragraph':
       return (
         <Text selectable={ctx.selectable} style={[base, spacing]}>
-          <Inline nodes={parseInline(block.text, partial)} ctx={ctx} />
+          <Inline nodes={parseInline(block.text, partial, { math: !!ctx.math })} ctx={ctx} />
         </Text>
       );
     case 'blockquote':
       return (
         <View style={[spacing, styles.quote, { borderLeftColor: theme.colors.quoteBar }]}>
           <Text selectable={ctx.selectable} style={[base, { color: theme.colors.textMuted }]}>
-            <Inline nodes={parseInline(block.text, partial)} ctx={ctx} />
+            <Inline nodes={parseInline(block.text, partial, { math: !!ctx.math })} ctx={ctx} />
           </Text>
         </View>
       );
@@ -170,7 +211,7 @@ function BlockView({ block, partial, ctx, first }: { block: Block; partial: bool
               <View key={i} style={[styles.listItem, { paddingLeft: item.depth * 18 }]}>
                 <Text style={[base, styles.marker, { color: theme.colors.textMuted }]}>{marker}</Text>
                 <Text selectable={ctx.selectable} style={[base, styles.listText]}>
-                  <Inline nodes={parseInline(item.text, partial && isLast)} ctx={ctx} />
+                  <Inline nodes={parseInline(item.text, partial && isLast, { math: !!ctx.math })} ctx={ctx} />
                 </Text>
               </View>
             );
@@ -181,6 +222,23 @@ function BlockView({ block, partial, ctx, first }: { block: Block; partial: bool
       return <CodeBlock code={block.code} lang={block.lang} ctx={ctx} style={spacing} streaming={partial} />;
     case 'table':
       return <Table block={block} ctx={ctx} partial={partial} style={spacing} />;
+    case 'math': {
+      const custom = ctx.math?.render?.(block.tex, true);
+      if (custom !== undefined) return <View style={spacing}>{custom}</View>;
+      return (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={spacing} contentContainerStyle={styles.mathBlock}>
+          <Text
+            selectable={ctx.selectable}
+            accessibilityLabel={block.tex}
+            style={[styles.mathText, { color: ctx.color, fontSize: theme.fontSize * 1.12, lineHeight: theme.fontSize * 1.6 }]}
+          >
+            {texToUnicode(block.tex)}
+          </Text>
+        </ScrollView>
+      );
+    }
+    case 'image':
+      return <MarkdownImage src={block.src} alt={block.alt} ctx={ctx} style={spacing} />;
     default:
       return null;
   }
@@ -193,7 +251,7 @@ function Inline({ nodes, ctx }: { nodes: InlineNode[]; ctx: Ctx }) {
       {nodes.map((node, i) => {
         switch (node.type) {
           case 'text':
-            return node.text;
+            return ctx.citations ? <Citations key={i} text={node.text} ctx={ctx} /> : node.text;
           case 'strong':
             return (
               <Text key={i} style={fontStyle(theme, 'bold')}>
@@ -225,6 +283,15 @@ function Inline({ nodes, ctx }: { nodes: InlineNode[]; ctx: Ctx }) {
                 {` ${node.text} `}
               </Text>
             );
+          case 'math': {
+            const custom = ctx.math?.render?.(node.tex, false);
+            if (custom !== undefined) return <React.Fragment key={i}>{custom}</React.Fragment>;
+            return (
+              <Text key={i} accessibilityLabel={node.tex} style={styles.mathText}>
+                {texToUnicode(node.tex)}
+              </Text>
+            );
+          }
           case 'link':
             return (
               <Text
@@ -239,6 +306,41 @@ function Inline({ nodes, ctx }: { nodes: InlineNode[]; ctx: Ctx }) {
           default:
             return null;
         }
+      })}
+    </>
+  );
+}
+
+const SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+const toSuperscript = (n: number) => String(n).split('').map((d) => SUPERSCRIPT[Number(d)]).join('');
+
+/** Turns "[1]" into a small tappable ¹ that opens source 1. Numbers without a source stay as typed. */
+function Citations({ text, ctx }: { text: string; ctx: Ctx }) {
+  const sources = ctx.citations ?? [];
+  const pieces = text.split(/(\[\d{1,2}\])/);
+  if (pieces.length === 1) return <>{text}</>;
+  return (
+    <>
+      {pieces.map((piece, i) => {
+        const match = /^\[(\d{1,2})\]$/.exec(piece);
+        const index = match ? Number(match[1]) - 1 : -1;
+        const source = sources[index];
+        if (!source) return piece;
+        const name = source.title ?? source.url ?? `Source ${index + 1}`;
+        return (
+          <Text
+            key={i}
+            accessibilityRole="link"
+            accessibilityLabel={`Source ${index + 1}: ${name}`}
+            suppressHighlighting
+            onPress={() =>
+              ctx.onCitationPress ? ctx.onCitationPress(source, index) : source.url ? void Linking.openURL(source.url).catch(() => {}) : undefined
+            }
+            style={{ color: ctx.theme.colors.accent, fontWeight: '700' }}
+          >
+            {toSuperscript(index + 1)}
+          </Text>
+        );
       })}
     </>
   );
@@ -319,6 +421,34 @@ function CodeBlock({ code, lang, ctx, style, streaming }: { code: string; lang: 
   );
 }
 
+/** An image from markdown (`![alt](url)`), e.g. one the model generated. Tap to view it full screen. */
+function MarkdownImage({ src, alt, ctx, style }: { src: string; alt: string; ctx: Ctx; style: any }) {
+  const [ratio, setRatio] = useState(4 / 3);
+  const [failed, setFailed] = useState(false);
+  if (failed) return <Text style={[style, { color: ctx.theme.colors.textMuted, fontStyle: 'italic' }]}>🖼 {alt || src}</Text>;
+  return (
+    <Pressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel={alt || 'Image'}
+      disabled={!ctx.onImagePress}
+      onPress={() => ctx.onImagePress?.(src, alt)}
+      style={style}
+    >
+      <Image
+        source={{ uri: src }}
+        accessibilityIgnoresInvertColors
+        onLoad={(e) => {
+          const { width, height } = e.nativeEvent.source ?? {};
+          if (width && height) setRatio(width / height);
+        }}
+        onError={() => setFailed(true)}
+        resizeMode="cover"
+        style={[styles.mdImage, { aspectRatio: ratio, borderRadius: ctx.theme.radius * 0.6, backgroundColor: ctx.theme.colors.inputBackground }]}
+      />
+    </Pressable>
+  );
+}
+
 function Table({ block, ctx, partial, style }: { block: Extract<Block, { type: 'table' }>; ctx: Ctx; partial: boolean; style: any }) {
   const { theme } = ctx;
   const columns = block.header.length;
@@ -338,7 +468,7 @@ function Table({ block, ctx, partial, style }: { block: Extract<Block, { type: '
       {Array.from({ length: columns }, (_, c) => (
         <View key={c} style={[styles.cell, { width: widths[c] }]}>
           <Text selectable={ctx.selectable} style={[cellText, header && fontStyle(theme, 'bold'), { textAlign: !block.align[c] || block.align[c] === 'left' ? 'auto' : block.align[c] }]}>
-            <Inline nodes={parseInline(cells[c] ?? '', partial && isLast)} ctx={ctx} />
+            <Inline nodes={parseInline(cells[c] ?? '', partial && isLast, { math: !!ctx.math })} ctx={ctx} />
           </Text>
         </View>
       ))}
@@ -382,6 +512,9 @@ const styles = StyleSheet.create({
   copy: { fontSize: 12, fontWeight: '600' },
   codeScroll: { padding: 12 },
   tableScroll: { flexGrow: 0 },
+  mathBlock: { flexGrow: 1, justifyContent: 'center', paddingVertical: 6 },
+  mathText: { fontFamily: Platform.select({ ios: 'Times New Roman', android: 'serif', default: 'Cambria Math, Times New Roman, serif' }) },
+  mdImage: { width: '100%', maxWidth: 420 },
   tableContent: { alignItems: 'flex-start' },
   table: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   row: { flexDirection: 'row' },

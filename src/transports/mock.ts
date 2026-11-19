@@ -6,7 +6,24 @@ export type MockStep =
   | { reasoning: string }
   /** Cited pages, shown as source chips. */
   | { sources: ChatSource[] }
-  | { tool: { name: string; label?: string; args?: unknown; durationMs?: number; result?: unknown; error?: string } }
+  /** An image in the reply (e.g. a generated one). */
+  | { image: { url: string; alt?: string; width?: number; height?: number } }
+  | {
+      tool: {
+        name: string;
+        label?: string;
+        args?: unknown;
+        durationMs?: number;
+        result?: unknown;
+        error?: string;
+        /** Pause for Approve / Deny before running. The reply continues after the user answers. */
+        requireApproval?: boolean;
+        /** The question shown on the approval card. */
+        approvalMessage?: string;
+        /** Said when the user taps Deny. */
+        deniedText?: string;
+      };
+    }
   /** Follow-up chips shown under the reply. */
   | { suggestions: string[] };
 
@@ -146,7 +163,69 @@ function searchReply(): MockStep[] {
   ];
 }
 
+function mathReply(): MockStep[] {
+  return [
+    {
+      text:
+        'The **quadratic formula** solves $ax^2 + bx + c = 0$:\n\n' +
+        '$$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$\n\n' +
+        'The part under the root, $\\Delta = b^2 - 4ac$, tells you how many real roots there are:\n\n' +
+        '- $\\Delta > 0$: two roots\n' +
+        '- $\\Delta = 0$: one root\n' +
+        '- $\\Delta < 0$: no real roots\n\n' +
+        '(Turn on `math` in ChatView to render formulas like these.)',
+    },
+    { suggestions: ['Solve x² − 5x + 6 = 0', 'Draw a sunset'] },
+  ];
+}
+
+function imageReply(): MockStep[] {
+  return [
+    { text: "Here's a sunset over a Goa beach, generated for you:\n\n" },
+    { tool: { name: 'generate_image', label: 'Creating image…', durationMs: 1800 } },
+    {
+      image: {
+        url: 'https://picsum.photos/seed/goa-sunset/1024/768',
+        alt: 'A warm sunset over a beach in Goa',
+        width: 1024,
+        height: 768,
+      },
+    },
+    { text: '\n\nTap the image to view it full screen or share it. (Demo image from picsum.photos.)' },
+    { suggestions: ['Make it more colorful', 'Plan a trip to Goa'] },
+  ];
+}
+
+function holdSeatReply(): MockStep[] {
+  return [
+    { text: 'I can hold the evening Akasa seat for 15 minutes while you decide.\n\n' },
+    {
+      tool: {
+        name: 'hold_seat',
+        label: 'Hold seat: Akasa QP 1129',
+        args: { flight: 'QP 1129', from: 'DEL', to: 'GOI', departs: 'Fri 18:30', price: 3980 },
+        approvalMessage: 'Hold 1 seat on Akasa QP 1129, Delhi → Goa, Friday 18:30, for ₹3,980?',
+        requireApproval: true,
+        durationMs: 1400,
+        result: { held: true, until: '18:45' },
+        deniedText: "No problem, I haven't held anything. Want me to look at other flights?",
+      },
+    },
+    { text: '\n\nDone! 🎉 Your seat is **held until 18:45**. Pay before then to confirm it.' },
+    { suggestions: ['Pay now', 'Find a hotel in Goa'] },
+  ];
+}
+
 function reasoningFor(text: string): string {
+  if (/\b(hold|reserve)\b/.test(text)) {
+    return '**Booking action**\nHolding a seat commits the user, so I must ask before doing it.\n\n**Plan**\nExplain the hold, then request approval for the hold_seat tool.';
+  }
+  if (/\b(draw|image|picture|generate)\b/.test(text)) {
+    return '**Image request**\nA warm beach sunset. Wide shot, soft light, calm water.\n\n**Plan**\nGenerate the image, then offer to tweak it.';
+  }
+  if (/\b(formula|equation|math|solve|quadratic)\b/.test(text)) {
+    return '**Math question**\nState the formula, then explain the discriminant and its three cases.';
+  }
   if (/search|news|latest|web|sources?/.test(text)) {
     return '**What they want**\nRecent news, so my own knowledge may be out of date.\n\n**Plan**\nSearch the web, summarize the top results, and cite each one as a source.';
   }
@@ -168,6 +247,9 @@ function defaultReply(messages: ChatMessage[]): MockStep[] {
   if (withFiles) return withFiles;
   const text = last ? getMessageText(last).toLowerCase() : '';
   if (/search|news|latest|web|sources?/.test(text)) return searchReply();
+  if (/\b(hold|reserve)\b/.test(text)) return holdSeatReply();
+  if (/\b(draw|image|picture|photo of|generate)\b/.test(text) && !/attach/.test(text)) return imageReply();
+  if (/\b(formula|equation|math|solve|quadratic)\b/.test(text)) return mathReply();
   if (/before|earlier|previous|remember|recap|summar/.test(text)) return recapReply(messages);
   if (/trip|flight|travel|book|plan/.test(text)) {
     return [...DEMO_REPLIES[1]!, { suggestions: ['Show cheaper flights', 'Hold the Akasa seat', 'What can I do in Goa?'] }];
@@ -184,21 +266,48 @@ export function createMockTransport(options: MockTransportOptions = {}): ChatTra
   let toolCounter = 0;
 
   return async function* mockTransport({ messages, signal, model }): AsyncGenerator<ChatChunk> {
-    const script = options.reply ? options.reply(messages) : defaultReply(messages);
+    // Continuing a reply after the user approved or denied a tool.
+    const lastMessage = messages[messages.length - 1];
+    const resumed = lastMessage?.role === 'assistant' ? lastMessage : undefined;
+    const history = resumed ? messages.slice(0, -1) : messages;
+    const script = options.reply ? options.reply(history) : defaultReply(history);
     let steps: MockStep[] = typeof script === 'string' ? [{ text: script }] : script;
+    if (resumed) {
+      const decided = [...resumed.parts]
+        .reverse()
+        .find((p) => p.type === 'tool-call' && (p.approval === 'approved' || p.approval === 'denied'));
+      if (!decided || decided.type !== 'tool-call') return;
+      const at = steps.findIndex((s) => 'tool' in s && s.tool.name === decided.name && s.tool.requireApproval);
+      const step = steps[at] as Extract<MockStep, { tool: unknown }> | undefined;
+      await sleep(initialDelayMs / 2, signal);
+      if (decided.approval === 'denied') {
+        for (const token of tokenize(`\n\n${step?.tool.deniedText ?? "Okay, I won't do that."}`)) {
+          if (signal.aborted) return;
+          yield { type: 'text-delta', text: token };
+          await sleep(tokenDelayMs, signal);
+        }
+        return;
+      }
+      await sleep(step?.tool.durationMs ?? 1200, signal);
+      if (signal.aborted) return;
+      yield { type: 'tool-call-end', id: decided.id, result: step?.tool.result, error: step?.tool.error };
+      steps = at === -1 ? [] : steps.slice(at + 1);
+    }
     const think = options.reasoning === 'auto' || options.reasoning === undefined ? /think|reason/i.test(model ?? '') : options.reasoning;
-    if (think && !options.reply && !steps.some((s) => 'reasoning' in s)) {
+    if (think && !resumed && !options.reply && !steps.some((s) => 'reasoning' in s)) {
       const last = messages[messages.length - 1];
       steps = [{ reasoning: reasoningFor(last ? getMessageText(last).toLowerCase() : '') }, ...steps];
     }
 
-    await sleep(initialDelayMs, signal);
+    if (!resumed) await sleep(initialDelayMs, signal);
     for (const step of steps) {
       if (signal.aborted) return;
       if ('suggestions' in step) {
         yield { type: 'suggestions', suggestions: step.suggestions };
       } else if ('sources' in step) {
         for (const source of step.sources) yield { type: 'source', source };
+      } else if ('image' in step) {
+        yield { type: 'image', id: `mock_image_${++toolCounter}`, url: step.image.url, alt: step.image.alt, width: step.image.width, height: step.image.height };
       } else if ('reasoning' in step) {
         for (const token of tokenize(step.reasoning)) {
           if (signal.aborted) return;
@@ -214,6 +323,11 @@ export function createMockTransport(options: MockTransportOptions = {}): ChatTra
       } else {
         const id = `mock_tool_${++toolCounter}`;
         const { name, label, args, durationMs = 1200, result, error } = step.tool;
+        if (step.tool.requireApproval) {
+          // Pause here; the reply continues when the user answers.
+          yield { type: 'tool-approval-request', id, name, label, args, message: step.tool.approvalMessage };
+          return;
+        }
         yield { type: 'tool-call-start', id, name, label, args };
         await sleep(durationMs, signal);
         if (signal.aborted) return;

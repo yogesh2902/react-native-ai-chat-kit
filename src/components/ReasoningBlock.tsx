@@ -4,6 +4,7 @@ import { useChatLabels } from '../labels';
 import { StreamingMarkdown } from '../markdown/StreamingMarkdown';
 import { fontStyle, useChatTheme, withAlpha } from '../theme';
 import type { ReasoningPart } from '../types';
+import { useReducedMotion } from './animations';
 
 export type ReasoningBlockProps = {
   part: ReasoningPart;
@@ -47,14 +48,14 @@ export function ReasoningBlock({ part, thinking, defaultExpanded = false, onTogg
         style={({ pressed }) => [styles.header, { opacity: pressed ? 0.6 : 1 }]}
       >
         <View style={[styles.icon, { backgroundColor: withAlpha(colors.accent, 0.12) }]}>
-          <Text style={[styles.iconGlyph, { color: colors.accent }]}>✦</Text>
+          <Text maxFontSizeMultiplier={1.3} style={[styles.iconGlyph, { color: colors.accent }]}>✦</Text>
         </View>
         {thinking ? (
           <ShimmerText text={title} color={colors.textMuted} highlight={colors.text} style={[{ fontSize: theme.fontSize * 0.86 }, fontStyle(theme, 'bold')]} />
         ) : (
           <Text style={[{ color: colors.textMuted, fontSize: theme.fontSize * 0.86 }, fontStyle(theme, 'bold')]}>{title}</Text>
         )}
-        <Text style={[styles.chevron, { color: colors.textMuted, transform: [{ rotate: expanded ? '90deg' : '0deg' }] }]}>›</Text>
+        <Text maxFontSizeMultiplier={1.3} style={[styles.chevron, { color: colors.textMuted, transform: [{ rotate: expanded ? '90deg' : '0deg' }] }]}>›</Text>
       </Pressable>
 
       {preview ? (
@@ -83,7 +84,12 @@ function lastLine(text: string): string {
 /** Text with a soft highlight pulsing through it while the model thinks. */
 function ShimmerText({ text, color, highlight, style }: { text: string; color: string; highlight: string; style: object }) {
   const t = useRef(new Animated.Value(0)).current;
+  const reduced = useReducedMotion();
   useEffect(() => {
+    if (reduced) {
+      t.setValue(0.5);
+      return;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(t, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
@@ -92,7 +98,7 @@ function ShimmerText({ text, color, highlight, style }: { text: string; color: s
     );
     loop.start();
     return () => loop.stop();
-  }, [t]);
+  }, [t, reduced]);
   const animatedColor = t.interpolate({ inputRange: [0, 1], outputRange: [color, highlight] });
   return <Animated.Text style={[style, { color: animatedColor }]}>{text}</Animated.Text>;
 }

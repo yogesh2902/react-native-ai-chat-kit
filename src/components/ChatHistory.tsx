@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Platform,
   Pressable,
   SectionList,
@@ -16,6 +17,7 @@ import type { ChatSessionMeta } from '../sessions/store';
 import { ChatLabelsContext, mergeLabels, useChatLabels, type ChatLabelsOverrides } from '../labels';
 import { fontStyle, useChatTheme } from '../theme';
 import { ChatThemeProvider, type ThemeProps } from './ChatThemeProvider';
+import { MessageMenu, type MessageMenuItem } from './MessageMenu';
 
 export type ChatHistoryItemRenderProps = {
   session: ChatSessionMeta;
@@ -46,6 +48,17 @@ export type ChatHistoryProps = ThemeProps & {
   labels?: ChatLabelsOverrides;
   /** Render each row yourself. */
   renderItem?: (props: ChatHistoryItemRenderProps) => React.ReactNode;
+  /** Adds Pin / Unpin to the long-press menu (`pinSession` from useChatSessions). */
+  onPin?: (id: string, pinned: boolean) => void;
+  /** Adds Rename (`renameSession` from useChatSessions). */
+  onRename?: (id: string, title: string) => void;
+  /**
+   * Adds Export / share. For example:
+   * `onExport={async (id) => Share.share({ message: await chat.exportSession(id) })}`
+   */
+  onExport?: (id: string) => void;
+  /** Search inside messages too, not just titles (`searchSessions` from useChatSessions). */
+  searchMessages?: (query: string) => Promise<ChatSessionMeta[]>;
 };
 
 /** A ChatGPT-style list of past conversations, grouped by date. */
@@ -74,13 +87,58 @@ function ChatHistoryInner({
   emptyText,
   style,
   renderItem: renderCustomItem,
+  onPin,
+  onRename,
+  onExport,
+  searchMessages,
 }: Omit<ChatHistoryProps, keyof ThemeProps | 'labels'>) {
   const theme = useChatTheme();
   const labels = useChatLabels();
   const [query, setQuery] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
-  const sections = useMemo(() => groupSessionsByDate(filterSessions(sessions, query), Date.now(), labels), [sessions, query, labels]);
+  const [menuSession, setMenuSession] = useState<ChatSessionMeta | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null);
+
+  // Message search: matching ids from the store, merged with title/preview matches.
+  const [contentMatches, setContentMatches] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!searchMessages || !query.trim()) {
+      setContentMatches(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchMessages(query)
+        .then((found) => !cancelled && setContentMatches(new Set(found.map((s) => s.id))))
+        .catch(() => {});
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, searchMessages]);
+
+  const visible = useMemo(() => {
+    const byTitle = filterSessions(sessions, query);
+    if (!contentMatches) return byTitle;
+    const ids = new Set(byTitle.map((s) => s.id));
+    return [...byTitle, ...sessions.filter((s) => !ids.has(s.id) && contentMatches.has(s.id))];
+  }, [sessions, query, contentMatches]);
+  const sections = useMemo(() => groupSessionsByDate(visible, Date.now(), labels), [visible, labels]);
+  const hasActions = !!(onPin || onRename || onExport);
+
+  const menuItems: MessageMenuItem[] = [];
+  if (menuSession) {
+    const target = menuSession;
+    if (onPin) {
+      menuItems.push({ key: 'pin', icon: '📌', label: target.pinned ? labels.unpin : labels.pin, onPress: () => onPin(target.id, !target.pinned) });
+    }
+    // MessageMenu runs these after its sheet has closed, so the dialog / share sheet can open.
+    if (onRename) menuItems.push({ key: 'rename', icon: '✎', label: labels.rename, onPress: () => setRenaming({ id: target.id, text: target.title }) });
+    if (onExport) menuItems.push({ key: 'export', icon: '⇪', label: labels.exportChat, onPress: () => onExport(target.id) });
+    if (onDelete) menuItems.push({ key: 'delete', icon: '🗑', label: labels.delete, destructive: true, onPress: () => setConfirmingId(target.id) });
+  }
   const { colors } = theme;
   const regular = fontStyle(theme);
   const bold = fontStyle(theme, 'bold');
@@ -199,9 +257,9 @@ function ChatHistoryInner({
                 accessibilityRole="button"
                 accessibilityLabel={`${item.title}. ${item.preview}`}
                 accessibilityState={{ selected: active }}
-                accessibilityHint={onDelete ? labels.longPressToDelete : undefined}
+                accessibilityHint={hasActions ? labels.longPressForActions : onDelete ? labels.longPressToDelete : undefined}
                 onPress={() => (confirming ? setConfirmingId(null) : onSelect(item.id))}
-                onLongPress={onDelete ? () => setConfirmingId(item.id) : undefined}
+                onLongPress={hasActions ? () => setMenuSession(item) : onDelete ? () => setConfirmingId(item.id) : undefined}
                 style={({ pressed }) => [
                   styles.row,
                   { borderRadius: theme.radius * 0.7 },
@@ -210,6 +268,7 @@ function ChatHistoryInner({
               >
                 <View style={styles.rowText}>
                   <View style={styles.rowTop}>
+                    {item.pinned ? <Text style={styles.pinIcon}>📌</Text> : null}
                     <Text numberOfLines={1} style={[styles.rowTitle, { color: colors.text }, bold]}>
                       {item.title}
                     </Text>
@@ -241,6 +300,61 @@ function ChatHistoryInner({
           }}
         />
       )}
+
+      {hasActions ? (
+        <MessageMenu
+          visible={!!menuSession}
+          title={menuSession ? labels.chatActions(menuSession.title) : undefined}
+          items={menuItems}
+          onClose={() => setMenuSession(null)}
+        />
+      ) : null}
+
+      <Modal visible={!!renaming} transparent animationType="fade" onRequestClose={() => setRenaming(null)} statusBarTranslucent>
+        <Pressable style={styles.dialogBackdrop} onPress={() => setRenaming(null)} accessibilityRole="button" accessibilityLabel={labels.cancel}>
+          <Pressable onPress={() => {}} accessibilityViewIsModal style={[styles.dialog, { backgroundColor: colors.background, borderRadius: theme.radius }]}>
+            <Text accessibilityRole="header" style={[{ color: colors.text, fontSize: 17, marginBottom: 12 }, bold]}>
+              {labels.renameChat}
+            </Text>
+            <TextInput
+              value={renaming?.text ?? ''}
+              onChangeText={(text) => setRenaming((r) => (r ? { ...r, text } : r))}
+              autoFocus
+              selectTextOnFocus
+              maxLength={80}
+              returnKeyType="done"
+              accessibilityLabel={labels.renameChat}
+              onSubmitEditing={() => {
+                if (renaming?.text.trim()) onRename?.(renaming.id, renaming.text.trim());
+                setRenaming(null);
+              }}
+              style={[
+                styles.dialogInput,
+                { color: colors.text, borderColor: colors.border, backgroundColor: colors.inputBackground },
+                regular,
+                Platform.OS === 'web' && ({ outlineStyle: 'none' } as object),
+              ]}
+            />
+            <View style={styles.dialogActions}>
+              <Pressable accessibilityRole="button" onPress={() => setRenaming(null)} style={[styles.clearButton, { borderColor: colors.border, borderWidth: StyleSheet.hairlineWidth }]}>
+                <Text style={[{ color: colors.text }, bold]}>{labels.cancel}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !renaming?.text.trim() }}
+                disabled={!renaming?.text.trim()}
+                onPress={() => {
+                  if (renaming?.text.trim()) onRename?.(renaming.id, renaming.text.trim());
+                  setRenaming(null);
+                }}
+                style={[styles.clearButton, { backgroundColor: colors.accent, opacity: renaming?.text.trim() ? 1 : 0.5 }]}
+              >
+                <Text style={[{ color: colors.onAccent }, bold]}>{labels.save}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -268,4 +382,9 @@ const styles = StyleSheet.create({
   clearActions: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
   clearButton: { borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 15 },
+  pinIcon: { fontSize: 12, marginRight: 4 },
+  dialogBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.35)', padding: 24 },
+  dialog: { width: '100%', maxWidth: 380, padding: 18 },
+  dialogInput: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 12, paddingVertical: Platform.OS === 'ios' ? 10 : 6, fontSize: 15 },
+  dialogActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 16 },
 });

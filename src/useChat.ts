@@ -8,6 +8,7 @@ import {
   type ChatStatus,
   type ChatAttachment,
   type ChatTransport,
+  type MessageBranch,
   type MessagePart,
   type MessageVersion,
   type ReplyReference,
@@ -27,6 +28,11 @@ export type UseChatOptions = {
    * them (‹ 2/3 ›). Default true. Set false to simply replace the reply.
    */
   keepReplyVersions?: boolean;
+  /**
+   * Editing a message keeps the original wording and the replies that followed it as a
+   * branch, so the user can flip back (‹ 1/2 ›). Default true. Set false to simply replace it.
+   */
+  keepEditBranches?: boolean;
 };
 
 export type SendOptions = {
@@ -58,10 +64,18 @@ export type UseChatResult = {
   regenerate: () => void;
   /** Show another version of a reply (0-based index into all its versions). */
   selectVersion: (id: string, index: number) => void;
+  /** Switch an edited message to another of its wordings, with the conversation that followed it. */
+  selectBranch: (id: string, index: number) => void;
   /** The active model (see the `model` option). */
   model: string | undefined;
   /** Switch models. Applies from the next reply. */
   setModel: (model: string) => void;
+  /**
+   * Answer a tool approval request (Approve / Deny). Once every pending tool in the
+   * reply is answered, the reply continues: the transport gets the conversation with
+   * the decision on the tool part (`approval: 'approved' | 'denied'`).
+   */
+  respondToTool: (toolCallId: string, approved: boolean) => void;
 };
 
 /** A short quote of a message for `send(text, { replyTo })`. */
@@ -93,6 +107,30 @@ export function allVersions(m: ChatMessage): MessageVersion[] {
   const others = m.versions ?? [];
   const at = Math.min(Math.max(m.versionIndex ?? others.length, 0), others.length);
   return [...others.slice(0, at), snapshot(m), ...others.slice(at)];
+}
+
+/** Mark tools still waiting for approval as denied (the user moved on). */
+function expirePendingApprovals(list: ChatMessage[]): ChatMessage[] {
+  let changed = false;
+  const next = list.map((m) => {
+    if (!m.parts.some((p) => p.type === 'tool-call' && p.approval === 'pending')) return m;
+    changed = true;
+    return {
+      ...m,
+      parts: m.parts.map((p) =>
+        p.type === 'tool-call' && p.approval === 'pending' ? { ...p, approval: 'denied' as const, state: 'denied' as const } : p,
+      ),
+    };
+  });
+  return changed ? next : list;
+}
+
+/** All wordings of an edited message in order, the current one (with `following`) included. */
+export function allBranches(m: ChatMessage, following: ChatMessage[]): MessageBranch[] {
+  const others = m.branches ?? [];
+  const at = Math.min(Math.max(m.branchIndex ?? others.length, 0), others.length);
+  const current: MessageBranch = { parts: m.parts, createdAt: m.createdAt, ...(m.replyTo ? { replyTo: m.replyTo } : {}), following };
+  return [...others.slice(0, at), current, ...others.slice(at)];
 }
 
 const keepsAsVersion = (m: ChatMessage) =>
@@ -241,7 +279,8 @@ export function useChat(options: UseChatOptions): UseChatResult {
         ...(replyTo ? { replyTo } : {}),
       };
       const assistant = newAssistant(makeId());
-      const history = [...messagesRef.current, userMessage];
+      // A new question replaces any approval still waiting for an answer.
+      const history = [...expirePendingApprovals(messagesRef.current), userMessage];
       commit([...history, assistant]);
       void run(history, assistant.id);
     },
@@ -298,6 +337,62 @@ export function useChat(options: UseChatOptions): UseChatResult {
     [updateMessage],
   );
 
+  const selectBranch = useCallback(
+    (id: string, index: number) => {
+      if (controllerRef.current) return;
+      const list = messagesRef.current;
+      const at = list.findIndex((m) => m.id === id);
+      const message = list[at];
+      if (!message?.branches?.length) return;
+      const all = allBranches(message, list.slice(at + 1));
+      const current = message.branchIndex ?? message.branches.length;
+      const target = all[index];
+      if (!target || index === current) return;
+      const { replyTo: _r, ...base } = message;
+      const switched: ChatMessage = {
+        ...base,
+        parts: target.parts,
+        createdAt: target.createdAt,
+        ...(target.replyTo ? { replyTo: target.replyTo } : {}),
+        branches: all.filter((_, i) => i !== index),
+        branchIndex: index,
+      };
+      commit([...list.slice(0, at), switched, ...target.following]);
+    },
+    [commit],
+  );
+
+  const respondToTool = useCallback(
+    (toolCallId: string, approved: boolean) => {
+      if (controllerRef.current) return;
+      const list = messagesRef.current;
+      const index = list.findIndex((m) => m.parts.some((p) => p.type === 'tool-call' && p.id === toolCallId && p.approval === 'pending'));
+      const target = list[index];
+      if (!target) return;
+      const decided: ChatMessage = {
+        ...target,
+        parts: target.parts.map((p) =>
+          p.type === 'tool-call' && p.id === toolCallId
+            ? { ...p, approval: approved ? ('approved' as const) : ('denied' as const), state: approved ? ('running' as const) : ('denied' as const) }
+            : p,
+        ),
+      };
+      const stillPending = decided.parts.some((p) => p.type === 'tool-call' && p.approval === 'pending');
+      // Continue the same reply once nothing else is waiting, if it's still the latest message.
+      if (stillPending || index !== list.length - 1) {
+        const next = list.slice();
+        next[index] = decided;
+        commit(next);
+        return;
+      }
+      const resumed: ChatMessage = { ...decided, status: 'streaming' };
+      const history = [...list.slice(0, index), resumed];
+      commit(history);
+      void run(history, resumed.id);
+    },
+    [commit, run],
+  );
+
   const setModel = useCallback((next: string) => {
     modelRef.current = next;
     setModelState(next);
@@ -330,12 +425,12 @@ export function useChat(options: UseChatOptions): UseChatResult {
       if (!trimmed && keptParts.length === 0) return;
 
       const makeId = optionsRef.current.generateId ?? defaultId;
-      const edited: ChatMessage = {
-        ...original,
-        id: makeId(),
-        parts: trimmed ? [...keptParts, { type: 'text', text: trimmed }] : keptParts,
-        createdAt: Date.now(),
-      };
+      const parts: MessagePart[] = trimmed ? [...keptParts, { type: 'text', text: trimmed }] : keptParts;
+      const branches = optionsRef.current.keepEditBranches === false ? undefined : allBranches(original, list.slice(index + 1));
+      const edited: ChatMessage = branches
+        ? // Same message, new wording; the old one and its replies stay as a branch.
+          { ...original, parts, createdAt: Date.now(), branches, branchIndex: branches.length }
+        : { ...original, id: makeId(), parts, createdAt: Date.now() };
       const history = [...list.slice(0, index), edited];
       const assistant = newAssistant(makeId());
       commit([...history, assistant]);
@@ -387,7 +482,9 @@ export function useChat(options: UseChatOptions): UseChatResult {
     setMessages,
     regenerate: retry,
     selectVersion,
+    selectBranch,
     model,
     setModel,
+    respondToTool,
   };
 }

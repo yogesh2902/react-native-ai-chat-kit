@@ -27,8 +27,13 @@ export type MessageRenderers = {
   /**
    * Render a tool call your own way (e.g. a flight card from `part.result`).
    * Return `undefined` to fall back to the default card for that tool.
+   * For tools waiting for approval (`part.state === 'awaiting-approval'`), call `respond(true | false)`.
    */
-  renderToolCall?: (part: ToolCallPart, message: ChatMessage) => React.ReactNode | undefined;
+  renderToolCall?: (
+    part: ToolCallPart,
+    message: ChatMessage,
+    respond?: (approved: boolean) => void,
+  ) => React.ReactNode | undefined;
   /** Replaces the three animated dots shown while waiting for the first token. */
   renderTypingIndicator?: () => React.ReactNode;
 };
