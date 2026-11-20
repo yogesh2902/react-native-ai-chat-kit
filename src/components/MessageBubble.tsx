@@ -70,6 +70,8 @@ export type MessageBubbleProps = MessageRenderers & {
   onSelectBranch?: (message: ChatMessage, index: number) => void;
   /** Approve / Deny on tools that need the user's OK. */
   onToolDecision?: (toolCallId: string, approved: boolean) => void;
+  /** Shows a Continue button (the reply was cut off). */
+  onContinue?: () => void;
   /** Mirror the swipe direction for right-to-left layouts. */
   rtl?: boolean;
   /** Briefly tint the message (after jumping to it from a quote). */
@@ -118,6 +120,7 @@ function MessageBubbleImpl({
   onSelectBranch,
   onImagePress,
   onFilePress,
+  onContinue,
 }: MessageBubbleProps) {
   const theme = useChatTheme();
   const labels = useChatLabels();
@@ -444,6 +447,14 @@ function MessageBubbleImpl({
           </View>
         ) : null}
 
+        {!isUser && !streaming && onContinue ? (
+          <View style={styles.suggestions}>
+            <FadeIn delay={80} distance={6}>
+              <SuggestionChip text={`▶\uFE0E ${labels.continueGenerating}`} trailing="" onPress={onContinue} />
+            </FadeIn>
+          </View>
+        ) : null}
+
         {!isUser && isLast && !streaming && onSuggestionPress && message.suggestions?.length ? (
           <View style={styles.suggestions} accessibilityLabel={labels.suggestionsHint}>
             {message.suggestions.map((suggestion, i) => (
@@ -657,7 +668,7 @@ function Action({
   );
 }
 
-function SuggestionChip({ text, onPress }: { text: string; onPress: () => void }) {
+function SuggestionChip({ text, onPress, trailing = ' ›' }: { text: string; onPress: () => void; trailing?: string }) {
   const theme = useChatTheme();
   const press = usePressScale(0.95);
   return (
@@ -669,7 +680,7 @@ function SuggestionChip({ text, onPress }: { text: string; onPress: () => void }
         onPressOut={press.onPressOut}
         style={[styles.suggestion, { borderColor: theme.colors.accent, backgroundColor: theme.colors.background }]}
       >
-        <Text style={[{ color: theme.colors.accent, fontSize: theme.fontSize * 0.85 }, fontStyle(theme, 'bold')]}>{text} ›</Text>
+        <Text style={[{ color: theme.colors.accent, fontSize: theme.fontSize * 0.85 }, fontStyle(theme, 'bold')]}>{`${text}${trailing}`}</Text>
       </Pressable>
     </Animated.View>
   );

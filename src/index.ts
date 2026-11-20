@@ -1,5 +1,5 @@
 // Hook
-export { useChat, toReplyReference, allVersions, allBranches } from './useChat';
+export { useChat, toReplyReference, allVersions, allBranches, canContinue, DEFAULT_CONTINUE_PROMPT } from './useChat';
 export type { UseChatOptions, UseChatResult, SendOptions } from './useChat';
 
 // Conversation history
@@ -87,14 +87,14 @@ export { texToUnicode } from './markdown/math';
 
 // Transports
 export { createStreamTransport, toSimpleMessages } from './transports/stream';
-export type { StreamTransportOptions, SimpleMessage, SimpleAttachment } from './transports/stream';
+export type { StreamTransportOptions, SimpleMessage, SimpleAttachment, SimpleToolCall } from './transports/stream';
 export { createMockTransport, tokenize } from './transports/mock';
 export { createProviderTransport } from './transports/provider';
 export type { ProviderTransportOptions } from './transports/provider';
 export { buildProviderRequest, PROVIDERS } from './providers';
 export type { ProviderConfig, ProviderName, ProviderMessage } from './providers';
 export type { MockStep, MockTransportOptions } from './transports/mock';
-export { parseAuto, parseNative, parseOpenAI, parseAnthropic, parseAISDK, parseGemini, createSSEDecoder } from './transports/parsers';
+export { parseAuto, parseNative, parseOpenAI, parseAnthropic, parseAISDK, parseGemini, createSSEDecoder, toFinishReason } from './transports/parsers';
 export type { StreamParser, SSEEvent } from './transports/parsers';
 
 // Markdown internals (useful for custom renderers)
@@ -104,7 +104,22 @@ export { highlight } from './markdown/highlight';
 export type { Token, TokenKind } from './markdown/highlight';
 
 // Labels (translations)
-export { defaultLabels, mergeLabels, useChatLabels, ChatLabelsContext } from './labels';
+export { defaultLabels, mergeLabels, useChatLabels, ChatLabelsContext, formatDayLabel, formatMonthLabel } from './labels';
+export {
+  chatLabelPacks,
+  CHAT_LANGUAGES,
+  labelsForLanguage,
+  isRTLLanguage,
+  hindiLabels,
+  arabicLabels,
+  spanishLabels,
+  frenchLabels,
+  germanLabels,
+  portugueseLabels,
+  japaneseLabels,
+  chineseLabels,
+} from './locales';
+export type { ChatLanguage } from './locales';
 export type { ChatLabels, ChatLabelsOverrides } from './labels';
 
 // Theme
@@ -117,6 +132,7 @@ export { getMessageText } from './types';
 export type {
   ChatMessage,
   ChatChunk,
+  FinishReason,
   ChatRole,
   ChatStatus,
   ChatTransport,

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+Every new feature is optional, with its own switch.
+
+- **Server-side tools (AI agents)**: `createChatHandler({ tools })` with `defineTool()` runs the full tool loop on the server with OpenAI, Claude and Gemini: the model calls a tool, the server runs it and feeds the result back, up to `maxSteps` (default 8; the last step must answer in text). Tool cards show labels, arguments and results in the app with no app changes. Tools with `needsApproval` (a boolean, or a function of the arguments) pause the reply on Approve / Deny; the pause is a signed resume token, so clients can't invent or alter tool calls. Claude thinking blocks and Gemini thought signatures are preserved across steps. `execute` gets `{ toolCallId, request, signal }`.
+- **Built-in languages**: `language="hi"` (also on `ChatHistory`) switches every label to Hindi, Arabic, Spanish, French, German, Portuguese, Japanese or Chinese; Arabic also mirrors the layout. New `formatDay` / `formatMonth` labels put dates in each language's order. Exported: `chatLabelPacks`, `labelsForLanguage()`, `isRTLLanguage()` and each pack.
+- **Continue generating**: a ▶ Continue button under replies cut off by the token limit, Stop, or an error; the rest streams into the same message (`continueReply()`, `canContinue()`, `allowContinue`, `continuePrompt`).
+- **Finish reasons**: a new `finish` stream event, parsed from OpenAI (Chat Completions and Responses), Anthropic and Gemini, saved as `message.finishReason`.
+- **Fast long chats**: `pageSize` (default 40) renders the newest messages and loads older pages as you scroll up, anchored so new replies don't shift what you're reading; list rendering is tuned for long chats.
+- **Tool history**: tool calls and their results are sent back with the conversation (`toolCalls` on `SimpleMessage`, and a short result note for custom backends).
+- **Tests**: 178 in total, including the server tool loop for all three providers, approvals, tampered tokens, continue, paging and the language packs.
+
 ## 0.4.0
 
 Every new feature is optional, with its own switch.

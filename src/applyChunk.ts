@@ -70,8 +70,17 @@ export function applyChunk(message: ChatMessage, chunk: ChatChunk, now: number =
       return { ...message, parts };
     }
     case 'tool-call-start': {
-      const exists = message.parts.some((p) => p.type === 'tool-call' && p.id === chunk.id);
-      if (exists) return message;
+      const at = message.parts.findIndex((p) => p.type === 'tool-call' && p.id === chunk.id);
+      if (at !== -1) {
+        // A second start for the same call fills in what the first didn't know yet (label, arguments).
+        const current = message.parts[at] as Extract<MessagePart, { type: 'tool-call' }>;
+        const label = chunk.label ?? current.label;
+        const args = chunk.args !== undefined ? chunk.args : current.args;
+        if (label === current.label && args === current.args) return message;
+        const parts = message.parts.slice();
+        parts[at] = { ...current, ...(label !== undefined ? { label } : {}), ...(args !== undefined ? { args } : {}) };
+        return { ...message, parts };
+      }
       const closed = closeReasoning(message.parts, now);
       const part: MessagePart = {
         type: 'tool-call',
@@ -90,10 +99,17 @@ export function applyChunk(message: ChatMessage, chunk: ChatChunk, now: number =
         state: 'awaiting-approval' as const,
         approval: 'pending' as const,
         ...(chunk.message ? { approvalMessage: chunk.message } : {}),
+        ...(chunk.resumeToken ? { resumeToken: chunk.resumeToken } : {}),
       };
       if (existing !== -1) {
         const parts = closed.slice();
-        parts[existing] = { ...(parts[existing] as Extract<MessagePart, { type: 'tool-call' }>), ...fields };
+        const current = parts[existing] as Extract<MessagePart, { type: 'tool-call' }>;
+        parts[existing] = {
+          ...current,
+          ...(chunk.label !== undefined ? { label: chunk.label } : {}),
+          ...(chunk.args !== undefined ? { args: chunk.args } : {}),
+          ...fields,
+        };
         return { ...message, parts };
       }
       const part: MessagePart = { type: 'tool-call', id: chunk.id, name: chunk.name, label: chunk.label, args: chunk.args, ...fields };
@@ -113,6 +129,8 @@ export function applyChunk(message: ChatMessage, chunk: ChatChunk, now: number =
       const suggestions = chunk.suggestions.map((s) => s.trim()).filter(Boolean).slice(0, 6);
       return suggestions.length ? { ...message, suggestions } : message;
     }
+    case 'finish':
+      return message.finishReason === chunk.reason ? message : { ...message, finishReason: chunk.reason };
     case 'error':
       return { ...message, status: 'error', error: chunk.message };
     default:

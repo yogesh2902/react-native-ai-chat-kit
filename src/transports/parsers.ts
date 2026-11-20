@@ -1,4 +1,4 @@
-import type { ChatChunk, ChatSource } from '../types';
+import type { ChatChunk, ChatSource, FinishReason } from '../types';
 
 /** Turns one SSE event's `data:` payload into zero or more chunks. */
 export type StreamParser = (data: string, event?: string) => ChatChunk[];
@@ -15,6 +15,40 @@ function tryJson(data: string): Json | undefined {
 }
 
 const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+
+const FINISH_REASONS: FinishReason[] = ['stop', 'length', 'tool-calls', 'content-filter', 'other'];
+
+/** Map each provider's stop reason onto FinishReason. */
+export function toFinishReason(raw: unknown): FinishReason | undefined {
+  if (typeof raw !== 'string' || !raw) return undefined;
+  switch (raw.toLowerCase()) {
+    case 'stop':
+    case 'end_turn':
+    case 'stop_sequence':
+      return 'stop';
+    case 'length':
+    case 'max_tokens':
+    case 'max_output_tokens':
+    case 'model_context_window_exceeded':
+      return 'length';
+    case 'tool_calls':
+    case 'tool_use':
+    case 'function_call':
+    case 'tool-calls':
+      return 'tool-calls';
+    case 'content_filter':
+    case 'refusal':
+    case 'safety':
+    case 'recitation':
+    case 'blocklist':
+    case 'prohibited_content':
+    case 'spii':
+    case 'content-filter':
+      return 'content-filter';
+    default:
+      return 'other';
+  }
+}
 
 /** Accept a source object loosely ({ url | uri, title, snippet }). */
 function toSource(raw: unknown): ChatSource | undefined {
@@ -39,8 +73,20 @@ export const parseNative: StreamParser = (data) => {
       return [{ type: 'tool-call-end', id: String(obj.id), result: obj.result, error: obj.error }];
     case 'tool-approval-request':
       return obj.id && obj.name
-        ? [{ type: 'tool-approval-request', id: String(obj.id), name: String(obj.name), label: obj.label, args: obj.args, message: obj.message }]
+        ? [
+            {
+              type: 'tool-approval-request',
+              id: String(obj.id),
+              name: String(obj.name),
+              label: obj.label,
+              args: obj.args,
+              message: obj.message,
+              ...(str(obj.resumeToken) ? { resumeToken: obj.resumeToken } : {}),
+            },
+          ]
         : [];
+    case 'finish':
+      return FINISH_REASONS.includes(obj.reason) ? [{ type: 'finish', reason: obj.reason }] : [];
     case 'reasoning-delta':
       return typeof obj.text === 'string' ? [{ type: 'reasoning-delta', text: obj.text }] : [];
     case 'image':
@@ -87,8 +133,14 @@ export const parseOpenAI: StreamParser = (data) => {
   if (obj.type === 'error' || (obj.error && typeof obj.error.message === 'string')) {
     return [{ type: 'error', message: obj.error?.message ?? obj.message ?? 'Unknown error' }];
   }
-  const delta = obj.choices?.[0]?.delta;
-  if (!delta) return [];
+  if (obj.type === 'response.incomplete') {
+    return [{ type: 'finish', reason: toFinishReason(obj.response?.incomplete_details?.reason) ?? 'other' }];
+  }
+  if (obj.type === 'response.completed') return [{ type: 'finish', reason: 'stop' }];
+  const choice = obj.choices?.[0];
+  const delta = choice?.delta;
+  const finish = toFinishReason(choice?.finish_reason);
+  if (!delta) return finish ? [{ type: 'finish', reason: finish }] : [];
   const out: ChatChunk[] = [];
   // OpenAI-compatible APIs (DeepSeek, OpenRouter, Groq, vLLM…) stream reasoning in one of these fields.
   const reasoning = str(delta.reasoning_content) ?? str(delta.reasoning);
@@ -100,6 +152,7 @@ export const parseOpenAI: StreamParser = (data) => {
       if (source) out.push({ type: 'source', source });
     }
   }
+  if (finish) out.push({ type: 'finish', reason: finish });
   return out;
 };
 
@@ -137,6 +190,11 @@ export const parseAnthropic: StreamParser = (data) => {
       ];
     }
     return [];
+  }
+  if (obj.type === 'message_delta') {
+    // 'pause_turn' means a server tool (web search) paused the turn; it isn't the end.
+    const reason = obj.delta?.stop_reason === 'pause_turn' ? undefined : toFinishReason(obj.delta?.stop_reason);
+    return reason ? [{ type: 'finish', reason }] : [];
   }
   if (obj.type === 'error' && obj.error) {
     return [{ type: 'error', message: String(obj.error.message ?? 'Unknown error') }];
@@ -205,6 +263,9 @@ export const parseGemini: StreamParser = (data) => {
     const source = toSource(g?.web);
     if (source) out.push({ type: 'source', source });
   }
+  const finish = toFinishReason(candidate?.finishReason);
+  if (finish && finish !== 'stop') out.push({ type: 'finish', reason: finish });
+  else if (finish === 'stop') out.push({ type: 'finish', reason: parts.some((p: Json) => p.functionCall) ? 'tool-calls' : 'stop' });
   return out;
 };
 

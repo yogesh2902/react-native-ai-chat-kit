@@ -3,7 +3,26 @@ import { createAsyncQueue } from './asyncQueue';
 import { createSSEDecoder, parseAuto, type StreamParser } from './parsers';
 
 export type SimpleAttachment = { mimeType: string; data: string; name?: string };
-export type SimpleMessage = { role: ChatMessage['role']; content: string; attachments?: SimpleAttachment[] };
+/** A tool call in an assistant message, with the user's decision for tools that needed approval. */
+export type SimpleToolCall = {
+  id: string;
+  name: string;
+  approval?: 'pending' | 'approved' | 'denied';
+  /** Hands a paused reply back to the built-in server (see ToolCallPart.resumeToken). */
+  resumeToken?: string;
+};
+export type SimpleMessage = {
+  role: ChatMessage['role'];
+  content: string;
+  attachments?: SimpleAttachment[];
+  toolCalls?: SimpleToolCall[];
+};
+
+const MAX_RESULT_CHARS = 2000;
+const resultText = (value: unknown) => {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return text && text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}…` : text;
+};
 
 const SENDABLE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']);
 
@@ -17,11 +36,19 @@ export function toSimpleMessages(messages: ChatMessage[]): SimpleMessage[] {
   for (const m of messages) {
     const texts: string[] = [];
     const attachments: SimpleAttachment[] = [];
+    const toolCalls: SimpleToolCall[] = [];
     for (const part of m.parts) {
       if (part.type === 'text') texts.push(part.text);
-      else if (part.type === 'tool-call' && (part.approval === 'approved' || part.approval === 'denied')) {
-        // Tell the model what the user decided about the tool it asked to run.
-        texts.push(`\n[Tool "${part.name}" was ${part.approval} by the user.]\n`);
+      else if (part.type === 'tool-call') {
+        toolCalls.push({
+          id: part.id,
+          name: part.name,
+          ...(part.approval ? { approval: part.approval } : {}),
+          ...(part.resumeToken ? { resumeToken: part.resumeToken } : {}),
+        });
+        // Tell the model what the user decided, and what tools returned, in earlier turns.
+        if (part.approval === 'approved' || part.approval === 'denied') texts.push(`\n[Tool "${part.name}" was ${part.approval} by the user.]\n`);
+        if (part.state === 'done' && part.result !== undefined) texts.push(`\n[Tool "${part.name}" returned: ${resultText(part.result)}]\n`);
       }
       else if (part.type === 'image') {
         if (part.base64) attachments.push({ mimeType: part.mimeType ?? 'image/jpeg', data: part.base64, ...(part.name ? { name: part.name } : {}) });
@@ -40,8 +67,13 @@ export function toSimpleMessages(messages: ChatMessage[]): SimpleMessage[] {
       ? `> ${m.replyTo.text.trim().replace(/\n/g, '\n> ')}\n\n(Replying to the quoted ${m.replyTo.role === 'user' ? 'message' : 'part of your answer'} above.)`
       : '';
     const content = [...docs, quote, words.join('')].filter((t) => t.trim()).join('\n\n');
-    if (!content && attachments.length === 0) continue;
-    out.push({ role: m.role, content, ...(attachments.length ? { attachments } : {}) });
+    if (!content && attachments.length === 0 && toolCalls.length === 0) continue;
+    out.push({
+      role: m.role,
+      content,
+      ...(attachments.length ? { attachments } : {}),
+      ...(m.role === 'assistant' && toolCalls.length ? { toolCalls } : {}),
+    });
   }
   return out;
 }

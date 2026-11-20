@@ -16,11 +16,12 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { ChatLabelsContext, mergeLabels, useChatLabels, type ChatLabelsOverrides } from '../labels';
+import { isRTLLanguage, labelsForLanguage, type ChatLanguage } from '../locales';
 import { fontStyle, useChatTheme } from '../theme';
 import { toSpeakableText } from '../markdown/plainText';
 import { isNetworkError } from '../adapters/network';
 import { getMessageText, type ChatAttachment, type ChatMessage, type ChatSource, type FilePart, type ReplyReference } from '../types';
-import { toReplyReference, type SendOptions } from '../useChat';
+import { canContinue, toReplyReference, type SendOptions } from '../useChat';
 import { expandCommand, matchCommand, type ChatCommand } from '../commands';
 import { CodeBlockOptionsContext, MarkdownFeaturesContext, type CodeBlockOptions, type MarkdownFeatures, type MathOptions } from '../markdown/StreamingMarkdown';
 import { ImageViewer } from './ImageViewer';
@@ -91,6 +92,11 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   /** Translate or reword any text in the UI, e.g. `{ placeholder: 'संदेश लिखें', copy: 'कॉपी' }`. */
   labels?: ChatLabelsOverrides;
   /**
+   * Use a built-in translation: 'hi', 'ar', 'es', 'fr', 'de', 'pt', 'ja', 'zh' or 'en'
+   * (region codes like 'pt-BR' work too). `labels` still overrides single strings.
+   */
+  language?: ChatLanguage | (string & {});
+  /**
    * Show 👍/👎 under replies and get called when the user rates one (`null` = rating removed).
    * With `useChat`/`useChatSessions` spread in, the rating is also saved on the message.
    */
@@ -132,6 +138,18 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   offlineQueue?: boolean;
   /** `flushQueue` from useChat (spread in). */
   flushQueue?: () => void;
+  /**
+   * Show a Continue button under a reply that was cut off (token limit, Stop, or a dropped
+   * connection). Needs `continueReply` from useChat. Default true.
+   */
+  allowContinue?: boolean;
+  /** `continueReply` from useChat (spread in). */
+  continueReply?: () => void;
+  /**
+   * Long chats render the newest messages first and load older ones as you scroll up,
+   * this many at a time. Default 40. `false` renders every message.
+   */
+  pageSize?: number | false;
   /** `selectBranch` from useChat (spread in). Shows ‹ 1/2 › on edited messages. */
   selectBranch?: (id: string, index: number) => void;
   /**
@@ -222,12 +240,14 @@ export type ChatViewProps = ThemeProps & MessageRenderers & {
   style?: StyleProp<ViewStyle>;
 };
 
-export function ChatView({ colorScheme, theme, palette, labels, ...props }: ChatViewProps) {
-  const merged = useMemo(() => mergeLabels(labels), [labels]);
+export function ChatView({ colorScheme, theme, palette, labels, language, ...props }: ChatViewProps) {
+  const merged = useMemo(() => mergeLabels(labels, labelsForLanguage(language)), [labels, language]);
+  // Arabic and other right-to-left languages mirror the layout unless `direction` says otherwise.
+  const direction = props.direction ?? (isRTLLanguage(language) ? 'rtl' : undefined);
   return (
     <ChatThemeProvider colorScheme={colorScheme} theme={theme} palette={palette} layout={props.layout}>
       <ChatLabelsContext.Provider value={merged}>
-        <ChatViewInner {...props} />
+        <ChatViewInner {...props} direction={direction} />
       </ChatLabelsContext.Provider>
     </ChatThemeProvider>
   );
@@ -307,11 +327,14 @@ function ChatViewInner({
   commands,
   offlineQueue = true,
   flushQueue,
+  allowContinue = true,
+  continueReply,
+  pageSize = 40,
   documentPreview = true,
   documentViewer,
   onFilePress,
   voiceMode = false,
-}: Omit<ChatViewProps, keyof ThemeProps | 'labels'>) {
+}: Omit<ChatViewProps, keyof ThemeProps | 'labels' | 'language'>) {
   const theme = useChatTheme();
   const labels = useChatLabels();
   const listRef = useRef<FlatList<ChatListItem>>(null);
@@ -369,7 +392,26 @@ function ChatViewInner({
   // Inverted list: newest message sits at offset 0, so streaming text grows
   // upward from the composer and the view stays pinned to the bottom for free.
   const withDates = dateSeparators ?? showTimestamps;
-  const data = useMemo(() => buildListItems(messages, { dateSeparators: withDates, labels }), [messages, withDates, labels]);
+
+  // Long chats: render from `oldestId` on; older messages load a page at a time as you scroll up.
+  // The window is anchored to a message, so new replies never push what you're reading out of it.
+  const pageLimit = pageSize === false ? Infinity : Math.max(1, Math.floor(pageSize));
+  const [oldestId, setOldestId] = useState<string | undefined>(undefined);
+  const start = useMemo(() => {
+    if (pageLimit === Infinity) return 0;
+    const at = oldestId ? messages.findIndex((m) => m.id === oldestId) : -1;
+    return at >= 0 ? at : Math.max(0, messages.length - pageLimit);
+  }, [messages, oldestId, pageLimit]);
+  useEffect(() => {
+    const id = pageLimit === Infinity ? undefined : messages[start]?.id;
+    if (id !== oldestId) setOldestId(id);
+  }, [messages, start, oldestId, pageLimit]);
+  const loadEarlier = useCallback(() => {
+    if (start <= 0) return;
+    setOldestId(messages[Math.max(0, start - pageLimit)]?.id);
+  }, [messages, start, pageLimit]);
+  const visibleMessages = useMemo(() => (start > 0 ? messages.slice(start) : messages), [messages, start]);
+  const data = useMemo(() => buildListItems(visibleMessages, { dateSeparators: withDates, labels }), [visibleMessages, withDates, labels]);
   const indexById = useMemo(() => new Map(messages.map((m, i) => [m.id, i])), [messages]);
   latestDataRef.current = data;
 
@@ -476,14 +518,26 @@ function ChatViewInner({
   useEffect(() => () => {
     if (flashTimer.current) clearTimeout(flashTimer.current);
   }, []);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const jumpTo = useCallback((id: string) => {
     const index = latestDataRef.current.findIndex((item) => item.kind === 'message' && item.message.id === id);
-    if (index < 0) return;
+    if (index < 0) {
+      // The quoted message is in an older page: show it, then scroll once it's rendered.
+      const all = messagesRef.current;
+      const at = all.findIndex((m) => m.id === id);
+      if (at < 0) return;
+      setOldestId(all[Math.max(0, at - 2)]?.id);
+      setTimeout(() => jumpToRef.current(id), 300);
+      return;
+    }
     listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
     setFlashId(id);
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlashId(null), 1400);
   }, []);
+  const jumpToRef = useRef(jumpTo);
+  jumpToRef.current = jumpTo;
 
   const handleToolDecision = useCallback(
     (toolCallId: string, approved: boolean) => {
@@ -536,6 +590,14 @@ function ChatViewInner({
   );
 
   const handleSuggestion = sendText;
+
+  const lastMessage = messages[messages.length - 1];
+  const continuableId =
+    allowContinue && continueReply && !isStreaming && lastMessage && canContinue(lastMessage) ? lastMessage.id : undefined;
+  const handleContinue = useCallback(() => {
+    feedback('send');
+    continueReply?.();
+  }, [continueReply, feedback]);
 
   // Read-aloud: one message at a time; tapping again stops it.
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -681,6 +743,7 @@ function ChatViewInner({
           onSelectBranch={selectBranch && !isStreaming ? handleSelectBranch : undefined}
           onImagePress={handleImagePress}
           onFilePress={handleFilePress}
+          onContinue={item.id === continuableId ? handleContinue : undefined}
         />
       );
     },
@@ -742,6 +805,8 @@ function ChatViewInner({
       handleSelectBranch,
       handleImagePress,
       handleFilePress,
+      continuableId,
+      handleContinue,
     ],
   );
 
@@ -807,6 +872,25 @@ function ChatViewInner({
               setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }), 250);
             }}
             contentContainerStyle={[styles.listContent, custom.listContent]}
+            initialNumToRender={12}
+            maxToRenderPerBatch={10}
+            windowSize={9}
+            onEndReached={start > 0 ? loadEarlier : undefined}
+            onEndReachedThreshold={0.4}
+            // Inverted: the footer sits at the top, above the oldest message shown.
+            ListFooterComponent={
+              start > 0 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={loadEarlier}
+                  style={({ pressed }) => [styles.loadEarlier, { borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 }]}
+                >
+                  <Text style={[{ color: theme.colors.textMuted, fontSize: theme.fontSize * 0.8 }, fontStyle(theme, 'bold')]}>
+                    {labels.loadEarlier(Math.min(start, pageLimit))}
+                  </Text>
+                </Pressable>
+              ) : undefined
+            }
           />
           {showJump ? (
             <Pressable
@@ -919,6 +1003,14 @@ const styles = StyleSheet.create({
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
   welcome: { flex: 1 },
   dateRow: { alignItems: 'center', paddingVertical: 8 },
+  loadEarlier: {
+    alignSelf: 'center',
+    marginVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   dateText: { fontSize: 12, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999, overflow: 'hidden' },
   banner: { marginHorizontal: 12, marginBottom: 4, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   bannerText: { fontSize: 13, textAlign: 'center' },
