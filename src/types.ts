@@ -18,6 +18,11 @@ export type ToolCallPart = {
   approval?: 'pending' | 'approved' | 'denied';
   /** What the user is asked to approve, e.g. "Hold 1 seat on Akasa for ₹3,980?" */
   approvalMessage?: string;
+  /**
+   * Opaque, signed state from the built-in server, sent back with the user's decision
+   * so the server can continue the reply. Apps don't need to read it.
+   */
+  resumeToken?: string;
 };
 
 export type ImagePart = {
@@ -146,7 +151,12 @@ export type ChatMessage = {
   branchIndex?: number;
   /** Assistant messages: the model that wrote the reply. */
   model?: string;
+  /** Assistant messages: why the reply ended. 'length' means it was cut off by the token limit. */
+  finishReason?: FinishReason;
 };
+
+/** Why a reply ended. 'length': cut off by the token limit; 'tool-calls': paused for tools. */
+export type FinishReason = 'stop' | 'length' | 'tool-calls' | 'content-filter' | 'other';
 
 /**
  * A single event emitted by a transport while the assistant is responding.
@@ -160,7 +170,7 @@ export type ChatChunk =
    * The model wants to run a tool that needs the user's OK. The reply pauses on
    * Approve / Deny; the choice is sent back with the conversation and the reply continues.
    */
-  | { type: 'tool-approval-request'; id: string; name: string; label?: string; args?: unknown; message?: string }
+  | { type: 'tool-approval-request'; id: string; name: string; label?: string; args?: unknown; message?: string; resumeToken?: string }
   /** Follow-up prompts to show as chips under the reply. */
   | { type: 'suggestions'; suggestions: string[] }
   /**
@@ -172,6 +182,8 @@ export type ChatChunk =
   | { type: 'reasoning-delta'; text: string }
   /** A source the answer cites. Duplicate URLs are ignored. */
   | { type: 'source'; source: ChatSource }
+  /** Why the reply ended. Send 'length' when it was cut off, so the app can offer Continue. */
+  | { type: 'finish'; reason: FinishReason }
   | { type: 'error'; message: string };
 
 export type TransportRequest = {

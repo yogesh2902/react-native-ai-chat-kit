@@ -56,6 +56,39 @@ export const SUPPORTED_ATTACHMENT_TYPES = ['image/jpeg', 'image/png', 'image/web
 
 export type ProviderRequest = { url: string; headers: Record<string, string>; body: unknown };
 
+/** A tool the model may call (name, what it does, and a JSON Schema for its arguments). */
+export type ToolDefinition = {
+  name: string;
+  description: string;
+  /** JSON Schema of the arguments object, e.g. `{ type: 'object', properties: { city: { type: 'string' } }, required: ['city'] }`. */
+  parameters?: Record<string, unknown>;
+};
+
+export type ProviderRequestOptions = {
+  tools?: ToolDefinition[];
+  /** 'none' stops the model from calling more tools (used for the last step of a tool loop). */
+  toolChoice?: 'auto' | 'none';
+  /**
+   * Turns in the provider's own format to append after the conversation:
+   * the assistant's tool calls and the tool results, from earlier steps of this reply.
+   */
+  continuation?: unknown[];
+};
+
+const EMPTY_SCHEMA = { type: 'object', properties: {} };
+
+/** Gemini accepts an OpenAPI subset of JSON Schema: drop the keywords it rejects. */
+function geminiSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(geminiSchema);
+  if (!schema || typeof schema !== 'object') return schema;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === '$schema' || key === 'additionalProperties' || key === '$id' || key === 'default') continue;
+    out[key] = geminiSchema(value);
+  }
+  return out;
+}
+
 const DEFAULT_BASE_URL: Record<ProviderName, string> = {
   openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com/v1',
@@ -99,9 +132,15 @@ function systemPrompt(config: ProviderConfig, messages: ProviderMessage[]): stri
 }
 
 /** Build the HTTP request that streams a reply from the provider. */
-export function buildProviderRequest(config: ProviderConfig, messages: ProviderMessage[]): ProviderRequest {
+export function buildProviderRequest(
+  config: ProviderConfig,
+  messages: ProviderMessage[],
+  options: ProviderRequestOptions = {},
+): ProviderRequest {
   const base = trimSlash(config.baseUrl ?? DEFAULT_BASE_URL[config.provider]);
   const system = systemPrompt(config, messages);
+  const tools = options.tools ?? [];
+  const continuation = options.continuation ?? [];
 
   switch (config.provider) {
     case 'openai': {
@@ -128,8 +167,16 @@ export function buildProviderRequest(config: ProviderConfig, messages: ProviderM
                   }
                 : { role: m.role, content: m.content },
             ),
+          ...continuation,
         ],
       };
+      if (tools.length) {
+        body.tools = tools.map((t) => ({
+          type: 'function',
+          function: { name: t.name, description: t.description, parameters: t.parameters ?? EMPTY_SCHEMA },
+        }));
+        if (options.toolChoice) body.tool_choice = options.toolChoice;
+      }
       if (config.temperature !== undefined) body.temperature = config.temperature;
       if (typeof config.reasoning === 'string' && !custom) body.reasoning_effort = config.reasoning;
       if (config.webSearch) body.web_search_options = {};
@@ -163,6 +210,7 @@ export function buildProviderRequest(config: ProviderConfig, messages: ProviderM
             : { role: t.role, content: t.content },
         ),
       };
+      (body.messages as unknown[]).push(...continuation);
       if (system) body.system = system;
       if (config.temperature !== undefined) body.temperature = config.temperature;
       if (config.reasoning) {
@@ -170,12 +218,14 @@ export function buildProviderRequest(config: ProviderConfig, messages: ProviderM
         body.thinking = { type: 'adaptive', display: 'summarized' };
         if (typeof config.reasoning === 'string') body.output_config = { effort: config.reasoning };
       }
+      const anthropicTools: unknown[] = [];
       if (config.webSearch) {
         const opts = typeof config.webSearch === 'object' ? config.webSearch : {};
-        body.tools = [
-          { type: opts.toolType ?? 'web_search_20260209', name: 'web_search', ...(opts.maxUses ? { max_uses: opts.maxUses } : {}) },
-        ];
+        anthropicTools.push({ type: opts.toolType ?? 'web_search_20260209', name: 'web_search', ...(opts.maxUses ? { max_uses: opts.maxUses } : {}) });
       }
+      for (const t of tools) anthropicTools.push({ name: t.name, description: t.description, input_schema: t.parameters ?? EMPTY_SCHEMA });
+      if (anthropicTools.length) body.tools = anthropicTools;
+      if (tools.length && options.toolChoice) body.tool_choice = { type: options.toolChoice };
       return {
         url: `${base}/messages`,
         headers: {
@@ -201,9 +251,18 @@ export function buildProviderRequest(config: ProviderConfig, messages: ProviderM
           ],
         })),
       };
+      (body.contents as unknown[]).push(...continuation);
       if (system) body.systemInstruction = { parts: [{ text: system }] };
       if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
-      if (config.webSearch) body.tools = [{ google_search: {} }];
+      const geminiTools: unknown[] = [];
+      if (config.webSearch) geminiTools.push({ google_search: {} });
+      if (tools.length) {
+        geminiTools.push({
+          functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: geminiSchema(t.parameters ?? EMPTY_SCHEMA) })),
+        });
+        if (options.toolChoice) body.toolConfig = { functionCallingConfig: { mode: options.toolChoice === 'none' ? 'NONE' : 'AUTO' } };
+      }
+      if (geminiTools.length) body.tools = geminiTools;
       return {
         url: `${base}/models/${encodeURIComponent(config.model)}:streamGenerateContent?alt=sse`,
         headers: { 'x-goog-api-key': config.apiKey },

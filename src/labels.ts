@@ -80,6 +80,10 @@ export type ChatLabels = {
   nextEdit: string;
   editOf: (current: number, total: number) => string;
   regenerate: string;
+  /** Button under a reply that was cut off (too long, stopped, or the connection dropped). */
+  continueGenerating: string;
+  /** Shown at the top of a long chat when older messages are hidden. */
+  loadEarlier: (count: number) => string;
 
   // Quote reply
   reply: string;
@@ -141,7 +145,22 @@ export type ChatLabels = {
   previous30Days: string;
   /** Short month names, January first. */
   months: string[];
+  /** A date from its parts, e.g. '12 Nov' / '12 Nov 2025' (default) or '11月12日'. `month` comes from `months`. */
+  formatDay?: (day: number, month: string, year?: number) => string;
+  /** A month heading in chat history, e.g. 'Nov 2025' (default) or '2025年11月'. */
+  formatMonth?: (month: string, year?: number) => string;
 };
+
+/** Day and month in the order the labels ask for. */
+export function formatDayLabel(labels: Pick<ChatLabels, 'formatDay'>, day: number, month: string, year?: number): string {
+  if (labels.formatDay) return labels.formatDay(day, month, year);
+  return year === undefined ? `${day} ${month}` : `${day} ${month} ${year}`;
+}
+
+export function formatMonthLabel(labels: Pick<ChatLabels, 'formatMonth'>, month: string, year?: number): string {
+  if (labels.formatMonth) return labels.formatMonth(month, year);
+  return year === undefined ? month : `${month} ${year}`;
+}
 
 export type ChatLabelsOverrides = Partial<ChatLabels>;
 
@@ -215,6 +234,8 @@ export const defaultLabels: ChatLabels = {
   nextEdit: 'Next version of this message',
   editOf: (current, total) => `Message version ${current} of ${total}`,
   regenerate: 'Regenerate',
+  continueGenerating: 'Continue',
+  loadEarlier: (count) => (count === 1 ? 'Show 1 earlier message' : `Show ${count} earlier messages`),
 
   reply: 'Reply',
   replyingTo: (role) => (role === 'user' ? 'Replying to your message' : 'Replying to the answer'),
@@ -271,9 +292,9 @@ export const defaultLabels: ChatLabels = {
   months: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
 };
 
-export function mergeLabels(overrides?: ChatLabelsOverrides): ChatLabels {
-  if (!overrides) return defaultLabels;
-  const merged = { ...defaultLabels };
+export function mergeLabels(overrides?: ChatLabelsOverrides, base: ChatLabels = defaultLabels): ChatLabels {
+  if (!overrides) return base;
+  const merged = { ...base };
   for (const key of Object.keys(overrides) as (keyof ChatLabels)[]) {
     const value = overrides[key];
     if (value !== undefined) (merged as Record<string, unknown>)[key] = value;

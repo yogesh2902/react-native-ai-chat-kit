@@ -33,7 +33,27 @@ export type UseChatOptions = {
    * branch, so the user can flip back (‹ 1/2 ›). Default true. Set false to simply replace it.
    */
   keepEditBranches?: boolean;
+  /**
+   * What the model is told when the user taps Continue on a reply that was cut off.
+   * It's sent with the request only; it never shows in the chat.
+   */
+  continuePrompt?: string;
 };
+
+export const DEFAULT_CONTINUE_PROMPT =
+  'Your last reply was cut off. Continue it exactly where it stopped, mid-sentence if needed. ' +
+  "Don't repeat anything you already wrote and don't add an introduction.";
+
+/**
+ * Whether a reply can be continued: it has some text and was cut off by the token
+ * limit, stopped by the user, or interrupted by an error (e.g. the connection dropped).
+ */
+export function canContinue(message: ChatMessage): boolean {
+  if (message.role !== 'assistant') return false;
+  if (!message.parts.some((p) => p.type === 'text' && p.text.trim())) return false;
+  if (message.parts.some((p) => p.type === 'tool-call' && p.approval === 'pending')) return false;
+  return message.finishReason === 'length' || message.status === 'stopped' || message.status === 'error';
+}
 
 export type SendOptions = {
   attachments?: ChatAttachment[];
@@ -82,6 +102,8 @@ export type UseChatResult = {
    * the decision on the tool part (`approval: 'approved' | 'denied'`).
    */
   respondToTool: (toolCallId: string, approved: boolean) => void;
+  /** Continue the last reply where it was cut off (see `canContinue`). New text is added to the same message. */
+  continueReply: () => void;
 };
 
 /** A short quote of a message for `send(text, { replyTo })`. */
@@ -426,6 +448,25 @@ export function useChat(options: UseChatOptions): UseChatResult {
     [commit, run],
   );
 
+  const continueReply = useCallback(() => {
+    if (controllerRef.current) return;
+    const list = messagesRef.current;
+    const last = list[list.length - 1];
+    if (!last || !canContinue(last)) return;
+    const { error: _error, finishReason: _finish, ...rest } = last;
+    const resumed: ChatMessage = { ...rest, status: 'streaming' };
+    commit([...list.slice(0, -1), resumed]);
+    // The instruction rides along with this request only; the chat itself doesn't show it.
+    const instruction: ChatMessage = {
+      id: `${resumed.id}:continue`,
+      role: 'user',
+      parts: [{ type: 'text', text: optionsRef.current.continuePrompt ?? DEFAULT_CONTINUE_PROMPT }],
+      createdAt: Date.now(),
+      status: 'done',
+    };
+    void run([...list.slice(0, -1), resumed, instruction], resumed.id);
+  }, [commit, run]);
+
   const setModel = useCallback((next: string) => {
     modelRef.current = next;
     setModelState(next);
@@ -522,5 +563,6 @@ export function useChat(options: UseChatOptions): UseChatResult {
     model,
     setModel,
     respondToTool,
+    continueReply,
   };
 }

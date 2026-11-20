@@ -40,11 +40,11 @@ export function Modal({ visible, children, onDismiss }: AnyProps) {
   return visible ? React.createElement('Modal', null, children) : null;
 }
 
-export function FlatList({ data = [], renderItem, keyExtractor, inverted }: AnyProps) {
+export function FlatList({ data = [], renderItem, keyExtractor, inverted, ListFooterComponent, onEndReached }: AnyProps) {
   const items = (data as unknown[]).map((item, index) =>
     React.createElement(React.Fragment, { key: keyExtractor ? keyExtractor(item, index) : index }, renderItem({ item, index })),
   );
-  return React.createElement('FlatList', { inverted }, items);
+  return React.createElement('FlatList', { inverted, onEndReached }, items, ListFooterComponent ?? null);
 }
 
 export function SectionList({ sections = [], renderItem, renderSectionHeader, keyExtractor, ListEmptyComponent, ListFooterComponent }: AnyProps) {

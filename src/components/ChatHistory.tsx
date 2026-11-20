@@ -15,6 +15,7 @@ import {
 import { filterSessions, formatSessionTime, groupSessionsByDate } from '../sessions/groupSessions';
 import type { ChatSessionMeta } from '../sessions/store';
 import { ChatLabelsContext, mergeLabels, useChatLabels, type ChatLabelsOverrides } from '../labels';
+import { isRTLLanguage, labelsForLanguage, type ChatLanguage } from '../locales';
 import { fontStyle, useChatTheme } from '../theme';
 import { ChatThemeProvider, type ThemeProps } from './ChatThemeProvider';
 import { MessageMenu, type MessageMenuItem } from './MessageMenu';
@@ -46,6 +47,11 @@ export type ChatHistoryProps = ThemeProps & {
   style?: StyleProp<ViewStyle>;
   /** Translate or reword any text on this screen. */
   labels?: ChatLabelsOverrides;
+  /**
+   * Use a built-in translation: 'hi', 'ar', 'es', 'fr', 'de', 'pt', 'ja', 'zh' or 'en'
+   * (region codes like 'pt-BR' work too). `labels` still overrides single strings.
+   */
+  language?: ChatLanguage | (string & {});
   /** Render each row yourself. */
   renderItem?: (props: ChatHistoryItemRenderProps) => React.ReactNode;
   /** Adds Pin / Unpin to the long-press menu (`pinSession` from useChatSessions). */
@@ -62,8 +68,8 @@ export type ChatHistoryProps = ThemeProps & {
 };
 
 /** A ChatGPT-style list of past conversations, grouped by date. */
-export function ChatHistory({ colorScheme, theme, palette, labels, ...props }: ChatHistoryProps) {
-  const merged = useMemo(() => mergeLabels(labels), [labels]);
+export function ChatHistory({ colorScheme, theme, palette, labels, language, ...props }: ChatHistoryProps) {
+  const merged = useMemo(() => mergeLabels(labels, labelsForLanguage(language)), [labels, language]);
   return (
     <ChatThemeProvider colorScheme={colorScheme} theme={theme} palette={palette}>
       <ChatLabelsContext.Provider value={merged}>
@@ -91,7 +97,7 @@ function ChatHistoryInner({
   onRename,
   onExport,
   searchMessages,
-}: Omit<ChatHistoryProps, keyof ThemeProps | 'labels'>) {
+}: Omit<ChatHistoryProps, keyof ThemeProps | 'labels' | 'language'>) {
   const theme = useChatTheme();
   const labels = useChatLabels();
   const [query, setQuery] = useState('');
@@ -273,7 +279,7 @@ function ChatHistoryInner({
                       {item.title}
                     </Text>
                     {!confirming ? (
-                      <Text style={[styles.time, { color: colors.textMuted }, regular]}>{formatSessionTime(item.updatedAt, Date.now(), labels.months)}</Text>
+                      <Text style={[styles.time, { color: colors.textMuted }, regular]}>{formatSessionTime(item.updatedAt, Date.now(), labels.months, labels.formatDay)}</Text>
                     ) : null}
                   </View>
                   {item.preview ? (

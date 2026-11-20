@@ -21,6 +21,7 @@
   ],
   "exclude": [
     "src/server",
-    "src/__tests__/server.test.ts"
+    "src/__tests__/server.test.ts",
+    "src/__tests__/server-tools.test.ts"
   ]
 }
