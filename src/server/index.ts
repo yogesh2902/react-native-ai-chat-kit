@@ -20,9 +20,51 @@ import {
 } from '../providers';
 import { createSSEDecoder } from '../transports/parsers';
 import type { ChatChunk } from '../types';
+import { signResumeState, verifyResumeToken, type ResumeState } from './resume';
+import { createTurnCollector, toolResultTurns, type ToolCallRequest, type ToolOutput } from './turns';
 
 export type { ProviderAttachment, ProviderConfig, ProviderMessage, ProviderName };
 export { buildProviderRequest, PROVIDERS };
+
+export type ToolContext = {
+  /** The id of this call. Use it to make side effects idempotent (e.g. as a booking's idempotency key). */
+  toolCallId: string;
+  /** The incoming request, e.g. to read the user's session. */
+  request: Request;
+  /** Aborted when the user taps Stop. */
+  signal: AbortSignal;
+};
+
+/**
+ * A tool the model can call. It runs on your server, so it can use secrets and databases.
+ *
+ *   bookSeat: defineTool<{ flight: string }>({
+ *     description: 'Hold a seat on a flight',
+ *     parameters: { type: 'object', properties: { flight: { type: 'string' } }, required: ['flight'] },
+ *     needsApproval: true,
+ *     approvalMessage: ({ flight }) => `Hold a seat on ${flight}?`,
+ *     execute: async ({ flight }) => holdSeat(flight),
+ *   })
+ */
+export type ChatTool<Args = any> = {
+  /** What the tool does; the model reads this to decide when to call it. */
+  description: string;
+  /** JSON Schema of the arguments object. */
+  parameters?: Record<string, unknown>;
+  /** Run the tool. Whatever you return goes back to the model (and to the tool card as `result`). Throw to report a failure. */
+  execute: (args: Args, context: ToolContext) => unknown | Promise<unknown>;
+  /** Ask the user first (Approve / Deny card). `true`, or decide per call from the arguments. */
+  needsApproval?: boolean | ((args: Args, context: ToolContext) => boolean | Promise<boolean>);
+  /** Text on the tool card while it runs, e.g. 'Searching flights…'. */
+  label?: string | ((args: Args) => string);
+  /** The question on the approval card, e.g. 'Hold 1 seat on Akasa QP 1129 for ₹3,980?'. */
+  approvalMessage?: string | ((args: Args) => string);
+};
+
+/** Typed helper for declaring a tool: `defineTool<{ city: string }>({ … })`. */
+export function defineTool<Args = any>(tool: ChatTool<Args>): ChatTool<Args> {
+  return tool;
+}
 
 export type ChatHandler = (request: Request) => Promise<Response>;
 
@@ -46,6 +88,18 @@ export type ChatHandlerOptions = ProviderConfig & {
   allowClientSystemMessages?: boolean;
   /** Edit the conversation before it goes to the provider, e.g. to add retrieved documents (RAG). */
   transformMessages?: (messages: ProviderMessage[], request: Request) => ProviderMessage[] | Promise<ProviderMessage[]>;
+  /**
+   * Tools the model can call, run here on the server. Tool cards (and Approve / Deny for
+   * tools with `needsApproval`) show in the app automatically.
+   */
+  tools?: Record<string, ChatTool>;
+  /** Most model calls in one reply when using tools (each round of tool calls is a step). Default 8. */
+  maxSteps?: number;
+  /**
+   * Secret that signs paused replies waiting for approval. Defaults to one derived from `apiKey`,
+   * so rotating the key (or changing this) invalidates approvals still waiting.
+   */
+  toolSecret?: string;
   /** Custom fetch (testing, proxies). */
   fetch?: typeof fetch;
 };
@@ -71,10 +125,10 @@ function jsonError(status: number, message: string, cors: Record<string, string>
 
 const ROLES = new Set(['user', 'assistant', 'system']);
 
-function readMessages(body: unknown): ProviderMessage[] | string {
+function readMessages(body: unknown): IncomingMessage[] | string {
   const raw = (body as Json | null)?.messages;
   if (!Array.isArray(raw)) return 'Body must be JSON like { "messages": [{ "role": "user", "content": "Hi" }] }';
-  const out: ProviderMessage[] = [];
+  const out: IncomingMessage[] = [];
   for (const m of raw) {
     const role = (m as Json)?.role;
     const content = (m as Json)?.content;
@@ -97,10 +151,37 @@ function readMessages(body: unknown): ProviderMessage[] | string {
         attachments.push({ mimeType, data, ...(typeof name === 'string' ? { name } : {}) });
       }
     }
-    out.push({ role: role as ProviderMessage['role'], content, ...(attachments?.length ? { attachments } : {}) });
+    const rawCalls = (m as Json).toolCalls;
+    let toolCalls: ClientToolCall[] | undefined;
+    if (rawCalls !== undefined) {
+      if (!Array.isArray(rawCalls)) return 'toolCalls must be an array.';
+      toolCalls = [];
+      for (const c of rawCalls) {
+        const id = (c as Json)?.id;
+        const name = (c as Json)?.name;
+        if (typeof id !== 'string' || typeof name !== 'string') return 'Each tool call needs an id and a name.';
+        const approval = (c as Json).approval;
+        const resumeToken = (c as Json).resumeToken;
+        toolCalls.push({
+          id,
+          name,
+          ...(approval === 'approved' || approval === 'denied' || approval === 'pending' ? { approval } : {}),
+          ...(typeof resumeToken === 'string' ? { resumeToken } : {}),
+        });
+      }
+    }
+    out.push({
+      role: role as ProviderMessage['role'],
+      content,
+      ...(attachments?.length ? { attachments } : {}),
+      ...(toolCalls?.length ? { toolCalls } : {}),
+    });
   }
   return out;
 }
+
+type ClientToolCall = { id: string; name: string; approval?: 'approved' | 'denied' | 'pending'; resumeToken?: string };
+type IncomingMessage = ProviderMessage & { toolCalls?: ClientToolCall[] };
 
 const encoder = new TextEncoder();
 const sse = (chunk: ChatChunk) => encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -142,14 +223,22 @@ export function createChatHandler(options: ChatHandlerOptions | (() => ChatHandl
     const maxBytes = config.maxAttachmentBytes ?? 15 * 1024 * 1024;
     if (attachmentBytes > maxBytes) return jsonError(413, `Attachments exceed ${Math.round(maxBytes / 1024 / 1024)} MB.`, cors);
 
-    let messages = (config.allowClientSystemMessages ? parsed : parsed.filter((m) => m.role !== 'system')).slice(
-      -(config.maxMessages ?? 100),
-    );
+    // A reply paused for tool approval comes back as its last message, with the user's decisions.
+    const last = parsed[parsed.length - 1];
+    const resuming = config.tools && last?.role === 'assistant' && last.toolCalls?.some((c) => c.resumeToken) ? last : undefined;
+    const history = resuming ? parsed.slice(0, -1) : parsed;
+
+    let messages: ProviderMessage[] = (config.allowClientSystemMessages ? history : history.filter((m) => m.role !== 'system'))
+      .slice(-(config.maxMessages ?? 100))
+      .map(({ role, content, attachments }) => ({ role, content, ...(attachments ? { attachments } : {}) }));
     if (config.transformMessages) messages = await config.transformMessages(messages, request);
     if (!messages.some((m) => m.role === 'user')) return jsonError(400, 'No user message to reply to.', cors);
 
     const requested = (body as Json | null)?.model;
     const model = typeof requested === 'string' && config.models?.includes(requested) ? requested : config.model;
+    if (config.tools && Object.keys(config.tools).length) {
+      return toolLoopResponse({ config: { ...config, model }, messages, request, resuming, cors });
+    }
     const upstreamRequest = buildProviderRequest({ ...config, model }, messages);
     const doFetch = config.fetch ?? fetch;
     let upstream: Response;
@@ -213,6 +302,208 @@ export function createChatHandler(options: ChatHandlerOptions | (() => ChatHandl
       },
     });
   };
+}
+
+// ---------------------------------------------------------------------------
+// Tool loop: call the model, run the tools it asks for, feed the results back,
+// repeat until it answers. Tools that need approval pause the reply.
+
+const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream; charset=utf-8',
+  'Cache-Control': 'no-cache, no-transform',
+  Connection: 'keep-alive',
+  'X-Accel-Buffering': 'no',
+};
+
+const callText = <Args>(value: string | ((args: Args) => string) | undefined, args: Args): string | undefined => {
+  try {
+    return typeof value === 'function' ? value(args) : value;
+  } catch {
+    return undefined;
+  }
+};
+
+function toolLoopResponse(input: {
+  config: ChatHandlerOptions;
+  messages: ProviderMessage[];
+  request: Request;
+  resuming: IncomingMessage | undefined;
+  cors: Record<string, string>;
+}): Response {
+  const { config, messages, request, resuming, cors } = input;
+  const tools = config.tools ?? {};
+  const definitions = Object.entries(tools).map(([name, t]) => ({ name, description: t.description, parameters: t.parameters }));
+  const maxSteps = Math.max(1, config.maxSteps ?? 8);
+  const secret = config.toolSecret ?? `react-native-ai-chat-kit:tools:${config.apiKey}`;
+  const doFetch = config.fetch ?? fetch;
+  const parse = providerParser(config.provider);
+  const abort = new AbortController();
+  const onAbort = () => abort.abort();
+  request.signal?.addEventListener('abort', onAbort, { once: true });
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (chunk: ChatChunk) => {
+        try {
+          controller.enqueue(sse(chunk));
+        } catch {
+          /* client went away */
+        }
+      };
+      const context = (toolCallId: string): ToolContext => ({ toolCallId, request, signal: abort.signal });
+
+      const run = async (call: ToolCallRequest): Promise<ToolOutput> => {
+        const tool = tools[call.name];
+        const base = { id: call.id, name: call.name, ...(call.providerId ? { providerId: call.providerId } : {}) };
+        if (!tool) {
+          send({ type: 'tool-call-end', id: call.id, error: `Unknown tool "${call.name}"` });
+          return { ...base, output: `Unknown tool "${call.name}".`, isError: true };
+        }
+        try {
+          const output = await tool.execute(call.args as never, context(call.id));
+          send({ type: 'tool-call-end', id: call.id, result: output });
+          return { ...base, output: output ?? null };
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          console.error(`[react-native-ai-chat-kit/server] tool "${call.name}" failed:`, message);
+          send({ type: 'tool-call-end', id: call.id, error: message });
+          return { ...base, output: `Error: ${message}`, isError: true };
+        }
+      };
+
+      try {
+        let turns: unknown[] = [];
+        let steps = 0;
+
+        if (resuming) {
+          // The newest token: a reply can pause more than once.
+          const token = [...(resuming.toolCalls ?? [])].reverse().find((c) => c.resumeToken)?.resumeToken ?? '';
+          const state = await verifyResumeToken(token, secret);
+          if (!state || state.provider !== config.provider) {
+            send({ type: 'error', message: 'This approval has expired. Ask again to continue.' });
+            return;
+          }
+          const decisions = new Map((resuming.toolCalls ?? []).map((c) => [c.id, c.approval]));
+          const outputs: ToolOutput[] = [...state.done];
+          for (const call of state.pending) {
+            if (decisions.get(call.id) === 'approved') outputs.push(await run(call));
+            else {
+              outputs.push({
+                id: call.id,
+                name: call.name,
+                output: 'The user declined this action. Do not run it; ask what they would like instead.',
+                ...(call.providerId ? { providerId: call.providerId } : {}),
+              });
+            }
+          }
+          turns = [...state.turns, ...toolResultTurns(config.provider, outputs)];
+          steps = state.steps;
+        }
+
+        while (true) {
+          if (abort.signal.aborted) break;
+          const lastStep = steps >= maxSteps - 1;
+          const upstreamRequest = buildProviderRequest(config, messages, {
+            tools: definitions,
+            continuation: turns,
+            ...(lastStep ? { toolChoice: 'none' as const } : {}),
+          });
+          steps++;
+          const upstream = await doFetch(upstreamRequest.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...upstreamRequest.headers },
+            body: JSON.stringify(upstreamRequest.body),
+            signal: abort.signal,
+          });
+          if (!upstream.ok || !upstream.body) {
+            const detail = (await upstream.text().catch(() => '')).slice(0, 500);
+            console.error(`[react-native-ai-chat-kit/server] ${config.provider} error ${upstream.status}: ${detail}`);
+            let message = detail;
+            try {
+              const j = JSON.parse(detail);
+              message = j?.error?.message ?? j?.message ?? detail;
+            } catch {
+              /* not JSON */
+            }
+            send({ type: 'error', message: `${config.provider} returned ${upstream.status}${message ? `: ${message}` : ''}` });
+            break;
+          }
+
+          // Stream this step to the app while rebuilding the assistant's turn.
+          const collector = createTurnCollector(config.provider);
+          const decoder = createSSEDecoder();
+          const textDecoder = new TextDecoder();
+          const handle = (events: { event?: string; data: string }[]) => {
+            for (const event of events) {
+              if (event.data === '[DONE]') continue;
+              collector.push(event.data);
+              for (const chunk of parse(event.data, event.event)) send(chunk);
+            }
+          };
+          const reader = upstream.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            handle(decoder.push(textDecoder.decode(value, { stream: true })));
+          }
+          handle(decoder.push(textDecoder.decode()));
+          handle(decoder.end());
+
+          const { assistant, toolCalls } = collector.finish();
+          if (!toolCalls.length || abort.signal.aborted) break;
+          turns = [...turns, assistant];
+
+          // Show every call on a card, then run the ones that don't need approval.
+          const waiting: ToolCallRequest[] = [];
+          const outputs: ToolOutput[] = [];
+          for (const call of toolCalls) {
+            const tool = tools[call.name];
+            send({ type: 'tool-call-start', id: call.id, name: call.name, label: callText(tool?.label, call.args), args: call.args });
+            const ask = tool?.needsApproval;
+            const needs = typeof ask === 'function' ? await ask(call.args as never, context(call.id)) : !!ask;
+            if (needs) waiting.push(call);
+          }
+          for (const call of toolCalls) if (!waiting.includes(call)) outputs.push(await run(call));
+
+          if (waiting.length) {
+            const state: ResumeState = { v: 1, provider: config.provider, turns, done: outputs, pending: waiting, steps };
+            const resumeToken = await signResumeState(state, secret);
+            for (const call of waiting) {
+              const tool = tools[call.name];
+              send({
+                type: 'tool-approval-request',
+                id: call.id,
+                name: call.name,
+                label: callText(tool?.label, call.args),
+                args: call.args,
+                message: callText(tool?.approvalMessage, call.args),
+                resumeToken,
+              });
+            }
+            break; // the app continues the reply once the user decides
+          }
+          turns = [...turns, ...toolResultTurns(config.provider, outputs)];
+        }
+      } catch (e) {
+        if (!abort.signal.aborted) {
+          console.error('[react-native-ai-chat-kit/server] tool loop failed:', e);
+          send({ type: 'error', message: e instanceof Error ? e.message : 'The reply failed.' });
+        }
+      } finally {
+        request.signal?.removeEventListener('abort', onAbort);
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
+    cancel() {
+      abort.abort();
+    },
+  });
+
+  return new Response(stream, { status: 200, headers: { ...SSE_HEADERS, ...cors } });
 }
 
 type Env = Record<string, string | undefined>;

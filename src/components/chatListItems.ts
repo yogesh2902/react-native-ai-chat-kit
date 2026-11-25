@@ -1,4 +1,4 @@
-import type { ChatLabels } from '../labels';
+import { formatDayLabel, type ChatLabels } from '../labels';
 import type { ChatMessage } from '../types';
 
 export type ChatListItem =
@@ -19,7 +19,7 @@ export function formatMessageTime(date: Date): string {
 /** "Today", "Yesterday", "12 Nov", or "12 Nov 2025" for other years. */
 export function formatDateSeparator(
   t: number,
-  labels: Pick<ChatLabels, 'today' | 'yesterday' | 'months'>,
+  labels: Pick<ChatLabels, 'today' | 'yesterday' | 'months' | 'formatDay'>,
   now = Date.now(),
 ): string {
   const day = startOfDay(t);
@@ -28,7 +28,7 @@ export function formatDateSeparator(
   if (day === today - 24 * 60 * 60 * 1000 || (today - day > 0 && today - day <= 25 * 60 * 60 * 1000)) return labels.yesterday;
   const d = new Date(t);
   const month = labels.months[d.getMonth()] ?? String(d.getMonth() + 1);
-  return d.getFullYear() === new Date(now).getFullYear() ? `${d.getDate()} ${month}` : `${d.getDate()} ${month} ${d.getFullYear()}`;
+  return formatDayLabel(labels, d.getDate(), month, d.getFullYear() === new Date(now).getFullYear() ? undefined : d.getFullYear());
 }
 
 /**
@@ -37,7 +37,7 @@ export function formatDateSeparator(
  */
 export function buildListItems(
   messages: ChatMessage[],
-  options: { dateSeparators: boolean; labels: Pick<ChatLabels, 'today' | 'yesterday' | 'months'>; now?: number },
+  options: { dateSeparators: boolean; labels: Pick<ChatLabels, 'today' | 'yesterday' | 'months' | 'formatDay'>; now?: number },
 ): ChatListItem[] {
   const visible = messages.filter((m) => m.role !== 'system');
   const items: ChatListItem[] = [];

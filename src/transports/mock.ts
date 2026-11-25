@@ -1,4 +1,4 @@
-import { getMessageText, type ChatChunk, type ChatMessage, type ChatSource, type ChatTransport } from '../types';
+import { getMessageText, type ChatChunk, type ChatMessage, type ChatSource, type ChatTransport, type FinishReason } from '../types';
 
 export type MockStep =
   | { text: string }
@@ -8,6 +8,8 @@ export type MockStep =
   | { sources: ChatSource[] }
   /** An image in the reply (e.g. a generated one). */
   | { image: { url: string; alt?: string; width?: number; height?: number } }
+  /** Why the reply ended; 'length' shows the Continue button. */
+  | { finish: FinishReason }
   | {
       tool: {
         name: string;
@@ -216,6 +218,33 @@ function holdSeatReply(): MockStep[] {
   ];
 }
 
+const STORY_START =
+  '## The lighthouse at Candolim\n\n' +
+  'Every evening at six, Meera climbed the hundred and twelve steps of the old lighthouse with a flask of chai and a notebook. ' +
+  'From the top she could see the whole curve of the beach: fishing boats pulled up on the sand, kids chasing the tide, ' +
+  'and the shacks lighting their lanterns one by one.\n\n' +
+  'She had been writing the same letter for three weeks. It was to her grandfather, who had kept this lighthouse for forty years ' +
+  'before the new automatic beacon made him retire. He had never told her why he kept a second lamp, smaller and older, ' +
+  'wrapped in cloth at the bottom of his trunk.\n\n' +
+  'Tonight, the monsoon clouds were rolling in early. As the first drops hit the glass, Meera noticed a light blinking far out at sea, ' +
+  'three short flashes, then a long one, the same pattern her grandfather used to';
+
+const STORY_END =
+  ' tap on the kitchen table when he thought nobody was watching.\n\n' +
+  'She ran down the steps, unlocked the trunk and unwrapped the little lamp. Its brass was green with age, but the wick was new. ' +
+  'Someone had been keeping it ready.\n\n' +
+  'Back at the top, she lit it and answered: three short, one long. Out on the dark water the distant light paused, then flashed twice, ' +
+  'slow and warm, like someone saying *finally*.\n\n' +
+  "The next morning a small boat came in with the tide. The old man who stepped off it was thinner than she remembered, " +
+  'but he was smiling, and he was holding a letter of his own.\n\n**The end.**';
+
+const isContinueRequest = (m: ChatMessage | undefined) =>
+  !!m && m.role === 'user' && (m.id.endsWith(':continue') || /^your last reply was cut off/i.test(getMessageText(m)));
+
+function storyReply(): MockStep[] {
+  return [{ text: STORY_START }, { finish: 'length' }];
+}
+
 function reasoningFor(text: string): string {
   if (/\b(hold|reserve)\b/.test(text)) {
     return '**Booking action**\nHolding a seat commits the user, so I must ask before doing it.\n\n**Plan**\nExplain the hold, then request approval for the hold_seat tool.';
@@ -246,6 +275,13 @@ function defaultReply(messages: ChatMessage[]): MockStep[] {
   const withFiles = last ? attachmentReply(last) : null;
   if (withFiles) return withFiles;
   const text = last ? getMessageText(last).toLowerCase() : '';
+  if (isContinueRequest(last)) {
+    const cut = messages[messages.length - 2];
+    return cut && getMessageText(cut).includes('Candolim')
+      ? [{ text: STORY_END }, { finish: 'stop' }, { suggestions: ['Write another story', 'Plan a trip to Goa'] }]
+      : [{ text: ' …and that is the rest of the answer.' }, { finish: 'stop' }];
+  }
+  if (/\b(story|essay)\b/.test(text)) return storyReply();
   if (/search|news|latest|web|sources?/.test(text)) return searchReply();
   if (/\b(hold|reserve)\b/.test(text)) return holdSeatReply();
   if (/\b(draw|image|picture|photo of|generate)\b/.test(text) && !/attach/.test(text)) return imageReply();
@@ -294,7 +330,7 @@ export function createMockTransport(options: MockTransportOptions = {}): ChatTra
       steps = at === -1 ? [] : steps.slice(at + 1);
     }
     const think = options.reasoning === 'auto' || options.reasoning === undefined ? /think|reason/i.test(model ?? '') : options.reasoning;
-    if (think && !resumed && !options.reply && !steps.some((s) => 'reasoning' in s)) {
+    if (think && !resumed && !options.reply && !isContinueRequest(lastMessage) && !steps.some((s) => 'reasoning' in s)) {
       const last = messages[messages.length - 1];
       steps = [{ reasoning: reasoningFor(last ? getMessageText(last).toLowerCase() : '') }, ...steps];
     }
@@ -306,6 +342,8 @@ export function createMockTransport(options: MockTransportOptions = {}): ChatTra
         yield { type: 'suggestions', suggestions: step.suggestions };
       } else if ('sources' in step) {
         for (const source of step.sources) yield { type: 'source', source };
+      } else if ('finish' in step) {
+        yield { type: 'finish', reason: step.finish };
       } else if ('image' in step) {
         yield { type: 'image', id: `mock_image_${++toolCounter}`, url: step.image.url, alt: step.image.alt, width: step.image.width, height: step.image.height };
       } else if ('reasoning' in step) {

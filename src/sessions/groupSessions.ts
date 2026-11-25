@@ -1,4 +1,4 @@
-import { defaultLabels, type ChatLabels } from '../labels';
+import { defaultLabels, formatDayLabel, formatMonthLabel, type ChatLabels } from '../labels';
 import type { ChatSessionMeta } from './store';
 
 export type SessionGroup = { title: string; data: ChatSessionMeta[] };
@@ -10,7 +10,8 @@ const startOfDay = (t: number) => {
   return d.getTime();
 };
 
-type GroupLabels = Pick<ChatLabels, 'today' | 'yesterday' | 'previous7Days' | 'previous30Days' | 'months'> & Partial<Pick<ChatLabels, 'pinned'>>;
+type GroupLabels = Pick<ChatLabels, 'today' | 'yesterday' | 'previous7Days' | 'previous30Days' | 'months' | 'formatMonth'> &
+  Partial<Pick<ChatLabels, 'pinned'>>;
 
 /** Group sessions ChatGPT-style: Pinned first, then Today, Yesterday, Previous 7 days, Previous 30 days, then by month. */
 export function groupSessionsByDate(
@@ -39,20 +40,25 @@ export function groupSessionsByDate(
       const d = new Date(t);
       const sameYear = d.getFullYear() === new Date(now).getFullYear();
       const month = labels.months[d.getMonth()] ?? String(d.getMonth() + 1);
-      add(sameYear ? month : `${month} ${d.getFullYear()}`, s);
+      add(formatMonthLabel(labels, month, sameYear ? undefined : d.getFullYear()), s);
     }
   }
   const dated = [...groups.entries()].map(([title, data]) => ({ title, data }));
   return pinned.length ? [{ title: labels.pinned ?? defaultLabels.pinned, data: pinned }, ...dated] : dated;
 }
 
-/** "14:05" for today, otherwise "12 Nov". */
-export function formatSessionTime(t: number, now = Date.now(), months: string[] = defaultLabels.months): string {
+/** "14:05" for today, otherwise "12 Nov". Pass `formatDay` to order the date for your language. */
+export function formatSessionTime(
+  t: number,
+  now = Date.now(),
+  months: string[] = defaultLabels.months,
+  formatDay?: ChatLabels['formatDay'],
+): string {
   const d = new Date(t);
   if (t >= startOfDay(now)) {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
-  return `${d.getDate()} ${months[d.getMonth()] ?? d.getMonth() + 1}`;
+  return formatDayLabel({ formatDay }, d.getDate(), months[d.getMonth()] ?? String(d.getMonth() + 1));
 }
 
 export function filterSessions(sessions: ChatSessionMeta[], query: string): ChatSessionMeta[] {

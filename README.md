@@ -70,11 +70,15 @@ This kit solves them once, with **zero native dependencies**: pure TypeScript, w
 - 📴 **Offline queue**: messages written offline wait in the chat and send automatically when you're back.
 - 📄 **Document preview**: tap a file to read it in the app (text, Markdown, code, CSV, PDF).
 - 🎙️ **Voice conversation mode**: talk hands-free; answers are read aloud, then it listens again.
+- 🤖 **AI agents with server-side tools**: define tools on the ready-made server; it runs the whole tool loop with OpenAI, Claude or Gemini, and asks the user before risky actions.
+- 🌍 **9 languages built in**: English, Hindi, Arabic, Spanish, French, German, Portuguese, Japanese and Chinese, with one `language` prop.
+- ▶️ **Continue generating**: a reply cut off by the token limit, Stop or a dropped connection picks up where it left off.
+- 📜 **Fast long chats**: long conversations render the newest messages and load older ones as you scroll up.
 - 📊 Tables, lists, task lists, quotes, headings, links.
 - ⏹️ **Stop & Retry**, error states, "scroll to latest" button.
 - 💬 **Starter suggestions** for empty chats, and **follow-up chips** under replies.
 - 👍 **Feedback buttons** with an `onFeedback` callback, and ✎ **edit & resend** for the last message.
-- 🌍 **Translatable** (every label and screen-reader text) with **right-to-left** layout for Arabic, Urdu and Hebrew.
+- 🌍 **Translatable** (every label and screen-reader text, or a built-in language pack) with **right-to-left** layout for Arabic, Urdu and Hebrew.
 - 🧱 **Layout presets** (`minimal`, `bubbles`, `compact`), a **rich welcome screen** with starter cards, and a **long-press menu** with your own actions.
 - 🕒 **Timestamps and date separators**, plus an **offline banner** that retries when the connection returns.
 - 🎨 **Fully customizable**: theme, custom fonts, per-piece styles, avatars, custom tool cards, send/stop buttons and history rows.
@@ -168,6 +172,42 @@ const transport = createStreamTransport({ url: 'https://your-app.vercel.app/api/
 ```
 
 The server converts every provider's stream into one format, handles CORS, drops system messages sent by app users (so they can't override your prompt), and limits message and attachment sizes. For more control, use `createChatHandler({ provider, apiKey, model, authorize, transformMessages, … })`, for example to check your own user sessions or add retrieved documents (RAG).
+
+#### Tools on the server (AI agents)
+
+Give the model tools that run on your server, next to your database and secrets. The server runs the whole loop (the model asks for a tool, the server runs it and hands the result back, the model answers) with OpenAI, Claude or Gemini. The app shows a card for every tool call, and **Approve / Deny** for tools that need the user's OK. No extra app code: spread `useChat` into `ChatView` as usual.
+
+```ts
+import { createChatHandler, defineTool } from 'react-native-ai-chat-kit/server';
+
+export const POST = createChatHandler({
+  provider: 'anthropic',
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+  model: 'claude-sonnet-5-5',
+  tools: {
+    get_weather: defineTool<{ city: string }>({
+      description: 'Current weather for a city',
+      parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] },
+      label: ({ city }) => `Checking the weather in ${city}…`,
+      execute: ({ city }) => weatherApi.current(city),
+    }),
+    hold_seat: defineTool<{ flight: string; price: number }>({
+      description: 'Hold a seat on a flight for 15 minutes',
+      parameters: { type: 'object', properties: { flight: { type: 'string' }, price: { type: 'number' } }, required: ['flight'] },
+      needsApproval: true, // or (args) => args.price > 5000
+      approvalMessage: ({ flight, price }) => `Hold a seat on ${flight} for ₹${price}?`,
+      execute: ({ flight }, { toolCallId, request }) => bookings.hold(flight, { idempotencyKey: toolCallId }),
+    }),
+  },
+});
+```
+
+- **Approvals are safe to trust.** When a tool needs approval the server pauses the reply and gives the app a signed token with the exact call. The app sends it back with the user's choice, so a client can't invent tool calls or change their arguments. Approved calls run; denied ones are reported to the model, which answers accordingly.
+- Whatever `execute` returns goes back to the model (and onto the tool card as `result`); throw to report an error.
+- `maxSteps` (default 8) caps model calls per reply; the last step must answer in text.
+- Use `toolCallId` as an idempotency key for side effects, so a retried request can't book twice.
+- The signing key defaults to one derived from your API key; set `toolSecret` to choose your own.
+- Thinking blocks (Claude) and thought signatures (Gemini) are kept across tool steps, so reasoning models work too.
 
 ### Option C: your own backend
 
@@ -443,6 +483,25 @@ import * as FileSystem from 'expo-file-system/legacy';
 | **Document preview** | `documentPreview` (default `true`), `documentViewer`, `onFilePress` | Tap a file chip. Text, Markdown, code, CSV and JSON render in the app with no extra packages. PDFs render inside the app on iOS and web via `createExpoDocumentViewer`; Android offers "Open in…" (your PDF app). |
 | **Voice conversation** | `voiceMode` (default `false`, needs `voice` + `speech`) | Listens, sends when you stop talking, reads the answer aloud, then listens again. Tap the orb to send early or interrupt; ✕ ends it. The conversation is saved like any other. |
 
+## Agents, languages, continue and long chats (0.5)
+
+```tsx
+<ChatView
+  {...chat} // continueReply comes from useChat / useChatSessions
+  language="hi" // 'en' | 'hi' | 'ar' | 'es' | 'fr' | 'de' | 'pt' | 'ja' | 'zh', or a code like 'pt-BR'
+  labels={{ placeholder: 'कुछ भी पूछें…' }} // still overrides single strings
+  pageSize={40}
+/>
+<ChatHistory {...historyProps} language="hi" />
+```
+
+| Feature | Turn on / off | Notes |
+| --- | --- | --- |
+| **Server-side tools** | `tools` on `createChatHandler` | See *Tools on the server* above. Tool cards and Approve / Deny work with no app changes. |
+| **Built-in languages** | `language` | Every label and screen-reader text in Hindi, Arabic, Spanish, French, German, Portuguese, Japanese or Chinese. Arabic switches the layout to right-to-left (unless you set `direction`). Dates follow the language (e.g. `11月12日`). The packs are exported too (`hindiLabels`, `labelsForLanguage('pt-BR')`, …) if you want to extend one. |
+| **Continue generating** | `allowContinue` (default `true`) | A **▶ Continue** button appears under a reply that was cut off by the token limit, stopped, or interrupted by an error. The rest is added to the same message. `useChat({ continuePrompt })` changes the hidden instruction; `canContinue(message)` tells you when it applies. Works with every provider (the server and the parsers report why a reply ended as a `finish` event). |
+| **Fast long chats** | `pageSize` (default `40`, `false` to turn off) | Long conversations show the newest messages; older pages load as you scroll up (or tap *Show earlier messages*). The window is anchored, so new replies don't push away what you're reading. Tapping a quote of an older message loads it. |
+
 ## Chat history (previous conversations)
 
 Swap `useChat` for `useChatSessions` and every conversation is saved automatically. Users can reopen any past chat and keep talking: new replies get that chat's full history as context.
@@ -492,8 +551,9 @@ function Assistant() {
 | `model` | `string` | Starting model for the model picker. Sent to the transport as `model`. |
 | `keepReplyVersions` | `boolean` | Keep earlier answers when regenerating (default `true`). |
 | `keepEditBranches` | `boolean` | Keep the original when a message is edited, as a branch (default `true`). |
+| `continuePrompt` | `string` | The hidden instruction sent when the user taps Continue. |
 
-Returns `{ messages, status, isStreaming, error, send, stop, retry, regenerate, selectVersion, selectBranch, respondToTool, flushQueue, clear, setMessages, rateMessage, editMessage, deleteMessage, model, setModel }`.
+Returns `{ messages, status, isStreaming, error, send, stop, retry, regenerate, continueReply, selectVersion, selectBranch, respondToTool, flushQueue, clear, setMessages, rateMessage, editMessage, deleteMessage, model, setModel }`.
 
 `send(text, { attachments, replyTo, command, queue })` also takes attachments from the pickers (see *Images, documents and voice*) and a message to quote.
 
@@ -514,7 +574,7 @@ Spread `useChat()` into it, plus:
 | `allowEdit` | Show Edit on the latest user message (default `true` when `editMessage` is spread in) |
 | `palette` | `'neutral'`, `'violet'`, `'ocean'`, `'sunset'` or `'forest'` |
 | `actionsStyle`, `animations` | Icon toolbar or text buttons; turn motion off |
-| `labels`, `direction` | Translate any UI text; `'rtl'` for right-to-left languages |
+| `language`, `labels`, `direction` | Built-in language pack; translate any UI text; `'rtl'` for right-to-left languages |
 | `layout` | `'minimal'`, `'bubbles'` or `'compact'` |
 | `welcome` | Logo, greeting and starter cards for the empty chat |
 | `messageActions`, `allowDelete` | Long-press menu items (and inline buttons); delete messages |
@@ -534,6 +594,8 @@ Spread `useChat()` into it, plus:
 | `offlineQueue`, `flushQueue` | Queue messages while offline (with `network`) |
 | `documentPreview`, `documentViewer`, `onFilePress` | Tap files to preview them |
 | `voiceMode` | Hands-free voice conversation (with `voice` + `speech`) |
+| `allowContinue`, `continueReply` | Continue a reply that was cut off |
+| `pageSize` | Messages rendered at first in long chats; older ones load on scroll |
 | `renderMessage` | Render messages yourself |
 | `bottomInset`, `keyboardVerticalOffset` | Safe-area and header offsets |
 

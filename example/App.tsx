@@ -37,7 +37,9 @@ import {
   useChatTheme,
   PALETTE_NAMES,
   applyPalette,
-  type ChatLabelsOverrides,
+  type ChatLanguage,
+  type ChatMessage,
+  CHAT_LANGUAGES,
   type ChatCommand,
   type ChatModelOption,
   type ChatPalette,
@@ -98,66 +100,22 @@ function createDemoSpeechRecognizer(): SpeechRecognizer {
   };
 }
 
-// ---- Translation demo (अ button): every label can be overridden ----
-const hindi: ChatLabelsOverrides = {
-  placeholder: 'कुछ भी पूछें…',
-  emptyTitle: 'मैं कैसे मदद करूँ?',
-  copy: 'कॉपी',
-  copied: 'कॉपी हो गया ✓',
-  retry: 'फिर से',
-  listen: '🔊 सुनें',
-  stopSpeaking: '■ रोकें',
-  edit: 'बदलें',
-  editing: 'संदेश बदल रहे हैं',
-  cancelEdit: 'रद्द करें',
-  stopped: 'रोका गया',
-  toolRunning: 'काम चल रहा है…',
-  toolDone: 'पूरा हुआ',
-  chats: 'चैट',
-  newChat: '＋ नई चैट',
-  searchChats: 'चैट खोजें',
-  noChats: 'अभी कोई चैट नहीं',
-  clearAllChats: 'सभी चैट हटाएं',
-  today: 'आज',
-  yesterday: 'कल',
-  previous7Days: 'पिछले 7 दिन',
-  previous30Days: 'पिछले 30 दिन',
-};
+// ---- Translation demo (language button): every label in 9 built-in languages, one prop ----
+const LANGUAGES: ChatLanguage[] = CHAT_LANGUAGES;
+// What the button shows: the language you switch to next.
+const LANGUAGE_BUTTON: Record<ChatLanguage, string> = { en: 'अ', hi: 'ع', ar: 'Es', es: 'Fr', fr: 'De', de: 'Pt', pt: 'あ', ja: '中', zh: 'A' };
 
-const arabic: ChatLabelsOverrides = {
-  placeholder: 'اسأل أي شيء…',
-  emptyTitle: 'كيف يمكنني المساعدة؟',
-  copy: 'نسخ',
-  copied: 'تم النسخ ✓',
-  retry: 'إعادة',
-  listen: '🔊 استمع',
-  stopSpeaking: '■ إيقاف',
-  edit: 'تعديل',
-  editing: 'تعديل الرسالة',
-  cancelEdit: 'إلغاء',
-  thinking: 'يفكر…',
-  stopped: 'تم الإيقاف',
-  toolRunning: 'جارٍ العمل…',
-  toolDone: 'تم',
-  deleteMessage: 'حذف الرسالة',
-  cancel: 'إلغاء',
-  chats: 'المحادثات',
-  newChat: '＋ محادثة جديدة',
-  searchChats: 'ابحث في المحادثات',
-  noChats: 'لا توجد محادثات بعد',
-  clearAllChats: 'حذف كل المحادثات',
-  today: 'اليوم',
-  yesterday: 'أمس',
-  previous7Days: 'آخر 7 أيام',
-  previous30Days: 'آخر 30 يومًا',
-  offline: 'أنت غير متصل. سيتم الإرسال عند عودة الاتصال.',
-  reconnecting: 'عاد الاتصال. جارٍ إعادة المحاولة…',
-};
-
-type Language = 'en' | 'hi' | 'ar';
-const LANGUAGES: Language[] = ['en', 'hi', 'ar'];
-const labelsFor = { en: undefined, hi: hindi, ar: arabic } as const;
-const LANGUAGE_BUTTON = { en: 'अ', hi: 'ع', ar: 'A' } as const;
+/** A long conversation for trying out paging (the /long command). */
+function longChat(count: number): ChatMessage[] {
+  const start = Date.now() - count * 60_000;
+  return Array.from({ length: count }, (_, i) => ({
+    id: `long-${start}-${i}`,
+    role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+    parts: [{ type: 'text' as const, text: i % 2 === 0 ? `Question ${i / 2 + 1}: what's a good thing to do in Goa?` : `Answer ${(i + 1) / 2}: try idea #${(i + 1) / 2}, a beach walk at sunset.` }],
+    createdAt: start + i * 60_000,
+    status: 'done' as const,
+  }));
+}
 
 // Empty screen with starter cards.
 // Reads the chat theme, so the logo follows the palette and dark mode.
@@ -174,6 +132,7 @@ const welcome: WelcomeConfig = {
     { icon: '🔎', title: 'Search the web', description: 'An answer with sources', prompt: 'Search the latest React Native news' },
     { icon: '🎨', title: 'Draw an image', description: 'A generated picture', prompt: 'Draw a sunset over a Goa beach' },
     { icon: '🧮', title: 'Explain a formula', description: 'Math, rendered', prompt: 'Explain the quadratic formula' },
+    { icon: '📖', title: 'Write a story', description: 'Cut off, then Continue', prompt: 'Write a short story set in Goa' },
   ],
 };
 
@@ -250,7 +209,7 @@ function Demo() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [look, setLook] = useState<Look>('minimal');
   const branded = look === 'brand';
-  const [language, setLanguage] = useState<Language>('en');
+  const [language, setLanguage] = useState<ChatLanguage>('en');
   const [palette, setPalette] = useState<ChatPalette>('violet');
 
   const transport = useMemo(
@@ -261,8 +220,13 @@ function Demo() {
   // Slash commands: type "/" in the composer. Prompt commands are expanded before sending;
   // onRun commands run app code instead.
   const commands = useMemo<ChatCommand[]>(
-    () => [...defaultCommands, { name: 'new', icon: '🆕', description: 'Start a new chat', onRun: () => chat.newSession() }],
-    [chat.newSession],
+    () => [
+      ...defaultCommands,
+      { name: 'new', icon: '🆕', description: 'Start a new chat', onRun: () => chat.newSession() },
+      // Paging demo: a 120-message chat. Older messages load as you scroll up.
+      { name: 'long', icon: '📜', description: 'Fill this chat with 120 messages', onRun: () => chat.setMessages(longChat(120)) },
+    ],
+    [chat.newSession, chat.setMessages],
   );
   const activeTitle = chat.sessions.find((s) => s.id === chat.activeSessionId)?.title ?? 'New chat';
 
@@ -272,8 +236,7 @@ function Demo() {
       <ChatView
         {...chat}
         colorScheme={scheme}
-        labels={labelsFor[language]}
-        direction={language === 'ar' ? 'rtl' : 'ltr'}
+        language={language}
         placeholder={language === 'en' ? 'Ask anything…' : undefined}
         layout={branded ? 'minimal' : look}
         palette={palette}
@@ -360,7 +323,7 @@ function Demo() {
       <SlideOver visible={historyOpen} onClose={() => setHistoryOpen(false)}>
         <ChatHistory
           colorScheme={scheme}
-          labels={labelsFor[language]}
+          language={language}
           palette={palette}
           sessions={chat.sessions}
           activeSessionId={chat.activeSessionId}
